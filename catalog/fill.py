@@ -12,6 +12,9 @@ def fill(text, repo_name, sha):
         raise SystemExit(f"repo name must be a GitHub repository name, got {repo_name!r}")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise SystemExit(f"sha must be exactly 40 lowercase hex characters, got {sha!r}")
+    # the rendered copy is public: drop the template's own comments (a private DRAFT note, the PLACEHOLDER marks)
+    text = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#")) + "\n"
+    text = re.sub(r'(sha: "\{SHA\}")\s+#.*', r"\1", text)
     out = text.replace("{REPO_NAME}", repo_name).replace("{SHA}", sha)
     left = re.findall(r"\{[A-Z_]+\}", out)
     if left:

@@ -22,6 +22,14 @@ class Fill(unittest.TestCase):
         self.assertIn('sha: "' + "a" * 40 + '"', out)
         self.assertNotIn("{", out.split("description")[0])
 
+    def test_the_rendered_copy_carries_no_template_comment(self):
+        out = fill.fill(TEXT, "falsify", "a" * 40)
+        self.assertIn("# DRAFT, private", TEXT)
+        self.assertNotIn("#", out.split("description")[0])
+        self.assertNotIn("DRAFT, private", out)
+        self.assertNotIn("never a PR", out)
+        self.assertNotIn("PLACEHOLDER", out)
+
     def test_fill_refuses_what_the_validator_would(self):
         for args in (("fal sify", "a" * 40), ("falsify", "abc"), ("falsify", "A" * 40)):
             with self.assertRaises(SystemExit):
