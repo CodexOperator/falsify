@@ -55,9 +55,16 @@ VOID. Fixed: mutant copies carry no bytecode. Source: goal:g5.53 M-GOLD, task a0
 
 ## Measured (goal:g5.52 only)
 
-| reading | value | source |
-|---|---|---|
-| suite size n | [PENDING] | g5.52 result node (director-thought-science) |
-| SOLVED = falsify PROVED + hidden test, per arm | [PENDING] | g5.52 result node, harness/books.py table |
-| USD per solved task, per arm | [PENDING] | g5.52 result node, door books /agi/usage |
-| suite mutants (M-SOLVE, M-HIDE, M-GOLD, M-PEEK) | [PENDING] | g5.52 result node, harness/validate.py + run_arm.py |
+A price list for one easy suite, not a quality ranking: every Console arm solved all 20 tasks through a minimal
+scripted loop (not an agent harness). Source for every row: agi graph posts/thought-master c0fd488d54, experiment:solved-claims-per-dollar-local-and-console-g5-52-run-1.
+
+| arm | solved / 20 | USD | USD per solved |
+|---|---|---|---|
+| claude-haiku-5-5 | 20 | 0.0198 | 0.00099 |
+| claude-sonnet-5-5, batch one-shot | 20 | 0.0701 | 0.0035 |
+| claude-sonnet-5-5 | 20 | 0.2656 | 0.0133 |
+| claude-opus-5-5 | 20 | 0.6762 | 0.0338 |
+| Qwen3-4B, local | 6 | 0 | 0 |
+
+SOLVED = falsify PROVED on the agent's own check AND a hidden test passes. Controls on the same suite: an agent that
+edits nothing solves 0/20; one that only adds a passing test reads VOID on 20/20; the reference fix reads SOLVED 20/20.

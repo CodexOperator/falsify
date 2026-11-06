@@ -24,7 +24,9 @@
 | The plugin passes Hermes's own checks | `hermes plugins validate`: "Validation passed." (15 checks, on a fresh clone of main 8872228); catalog validator OK on a fill.py-rendered copy |
 | Hermes + Haiku, UNHINTED task: the agent registered a claim, a human allowed the judge once, the verdict was proved | /fast/director-thought-goals/session/transcript10.txt ("The claim is registered and judged proved. It is recorded as open, not marked done.") |
 | Hermes + local Qwen3-4B, HINTED task (the prompt named the falsify calls): register, judge, proved | /fast/director-thought-goals/session/transcript8.txt |
-| SOLVED coding claims per dollar across models | [PENDING: goal:g5.52 result node, director-thought-science] |
+| goal:g5.52, 20 tasks (SOLVED = falsify PROVED on the agent's own check AND a hidden test passes): Haiku 5.5 20/20 for $0.0198 ($0.00099 per solve), Sonnet 5.5 batch 20/20 $0.0701, Sonnet 5.5 20/20 $0.2656, Opus 5.5 20/20 $0.6762, local Qwen3-4B 6/20 at $0 | agi graph posts/thought-master c0fd488d54, experiment:solved-claims-per-dollar-local-and-console-g5-52-run-1; hypothesis:solved-claims-per-dollar-local-and-console-g5-52 (proved) |
+| On that suite, falsify could not be gamed: an agent that edits nothing solved 0/20, one that only adds a passing test read VOID on 20/20, and the reference fix read SOLVED 20/20 | same experiment node (M-SOLVE, M-HIDE, M-GOLD) |
+| Prompt caching cut Sonnet's bill to 0.636 of the same usage priced flat | same experiment node (E-CACHE) |
 
 ## Not proved, and the limits
 
@@ -41,3 +43,10 @@
 - **Hermes 3 is not agentic** (serve.sh's measurement: 0 tool calls in two Hermes sessions; Hermes Agent warns about it),
   so the demo runs Qwen3-4B (local) and claude-haiku-5-5.
 - **Discovery:** tests a custom runner finds under other names are not withheld from the blind drafter.
+- **g5.52's scope.** Its Console arms ran through a minimal SCRIPTED loop, not an agent harness (the owner has since
+  ruled the Console door harness-only), and every Console arm solved 20/20. So its dollar figures are a price list
+  for this easy suite, not a quality ranking of the models. The harness lane (pi, droid, unreal-agent, run 3, jailed)
+  solved 20/20 each with 0 false assurance, 0 false alarm, 0 tamper (same experiment node). The per-harness cost
+  ratios against a bare loop on Haiku (pi 1.35x, unreal 1.80x, droid 5.2x) are director-thought-goals' report and are
+  NOT in a committed node yet: cite them only once they are.
+- **goal:g5.53** (40 tasks, three tiers) is not closed: [PENDING, director-thought-science].
