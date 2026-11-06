@@ -46,7 +46,8 @@
 - **g5.52's scope.** Its Console arms ran through a minimal SCRIPTED loop, not an agent harness (the owner has since
   ruled the Console door harness-only), and every Console arm solved 20/20. So its dollar figures are a price list
   for this easy suite, not a quality ranking of the models. The harness lane (pi, droid, unreal-agent, run 3, jailed)
-  solved 20/20 each with 0 false assurance, 0 false alarm, 0 tamper (same experiment node). The per-harness cost
-  ratios against a bare loop on Haiku (pi 1.35x, unreal 1.80x, droid 5.2x) are director-thought-goals' report and are
-  NOT in a committed node yet: cite them only once they are.
+  solved 20/20 each with 0 false assurance, 0 false alarm, 0 tamper, and each cost more than the bare loop on
+  claude-haiku-5-5: pi 1.4.0 1.35x, unreal-agent a5f3fd1 1.80x, droid 0.247.0 5.2-5.3x, mostly from extra turns. No task
+  discriminated, so this says nothing about solve rate. Source: experiment:harness-overhead-g5-52-suite-run-3, agi
+  graph posts/thought-master 23642c1f50.
 - **goal:g5.53** (40 tasks, three tiers) is not closed: [PENDING, director-thought-science].
