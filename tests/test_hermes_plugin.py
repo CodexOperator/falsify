@@ -7,6 +7,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import importlib.util
 
@@ -34,7 +35,10 @@ class FakeState:
 
 class FakeCtx:
     def __init__(self, d):
-        self.state, self.tools, self.hooks, self.skills, self.schemas = FakeState(d), {}, {}, {}, {}
+        self.state, self.tools, self.hooks, self.skills, self.schemas, self.settings = FakeState(d), {}, {}, {}, {}, {}
+
+    def get_config(self, key, default=None):
+        return self.settings.get(key, default)
 
     def register_tool(self, name, toolset, schema, handler, **kw):
         self.tools[name], self.schemas[name] = handler, schema
@@ -154,6 +158,41 @@ class TestHermesPlugin(unittest.TestCase):
         self.assertNotIn("next", st[1])
         stored, _ = P.Store(self.ctx.state.data_dir / "store").load("results", r["result"])
         self.assertNotIn("falsify_done", stored["why"])   # the stored result is unchanged
+
+    def test_the_drafter_key_comes_from_hermes_secret_scope_never_os_environ(self):
+        class Guarded(dict):   # an os.environ that refuses every drafter variable
+            def _no(self, k):
+                if str(k).startswith("FALSIFY_DRAFT"):
+                    raise AssertionError(f"the plugin read {k} from os.environ")
+            def __getitem__(self, k):
+                self._no(k)
+                return super().__getitem__(k)
+            def get(self, k, d=None):
+                self._no(k)
+                return super().get(k, d)
+            def __contains__(self, k):
+                self._no(k)
+                return super().__contains__(k)
+        asked, sent = [], []
+        secrets = {"FALSIFY_DRAFT_URL": "http://drafter:1", "FALSIFY_DRAFT_KEY": "k-from-scope"}
+        ctx = FakeCtx(tempfile.mkdtemp())
+        ctx.settings.update(draft_api="anthropic", draft_model="m", draft_k=2)
+        mk = lambda url, model, k, api_key=None, **kw: sent.append((url, api_key, model, k, kw["api"])) or "drafter"
+        with unittest.mock.patch.object(os, "environ", Guarded({**os.environ, "FALSIFY_DRAFT_KEY": "k-from-ENV"})), \
+                unittest.mock.patch.object(P.draft, "make_drafter", mk):
+            self.assertEqual(P.drafter_for(ctx, get_secret=lambda n: asked.append(n) or secrets.get(n)), "drafter")
+            P.register(ctx, get_secret=secrets.get)
+            ctx.tools["falsify_status"]({})          # first use: the LazyStore builds its drafter here
+        self.assertEqual(sorted(set(asked)), ["FALSIFY_DRAFT_KEY", "FALSIFY_DRAFT_URL"])
+        self.assertEqual(sent, [("http://drafter:1", "k-from-scope", "m", 2, "anthropic")] * 2)
+        self.assertIsNone(P.drafter_for(ctx, get_secret=lambda n: None))     # no URL: no drafter, no network
+        self.assertIsNone(P.drafter_for(ctx, get_secret=lambda n: 1 / 0))    # an unscoped read fails closed
+
+    def test_the_manifest_declares_the_drafter_secrets(self):
+        y = (ROOT / "plugin.yaml").read_text()
+        self.assertIn("draft_key: {type: secret, env: FALSIFY_DRAFT_KEY", y)
+        self.assertIn("draft_url: {type: secret, env: FALSIFY_DRAFT_URL", y)
+        self.assertNotIn("requires_env", y)   # an optional key must never gate loading
 
     def test_register_writes_nothing(self):
         d = tempfile.mkdtemp()

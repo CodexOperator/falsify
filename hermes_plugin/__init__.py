@@ -143,23 +143,45 @@ def make_tools(store, grants):
     ]
 
 
+def drafter_for(ctx, get_secret=None):
+    """The blind drafter under Hermes (catalog rules 6 + 11): the URL and key come ONLY through Hermes's secret scope
+    (agent.secret_scope.get_secret, declared as config_schema secrets in plugin.yaml), the rest from the plugin's
+    settings. os.environ is never read here; draft.from_env gets an explicit mapping. -> a drafter, or None."""
+    if get_secret is None:
+        try:
+            from agent.secret_scope import get_secret
+        except ImportError:
+            return None
+
+    def secret(name):
+        try:
+            return get_secret(name)
+        except Exception:   # an unscoped read under multiplexing fails closed: no drafter
+            return None
+    conf = getattr(ctx, "get_config", lambda key, default=None: default)
+    env = {"FALSIFY_DRAFT_URL": secret("FALSIFY_DRAFT_URL"), "FALSIFY_DRAFT_KEY": secret("FALSIFY_DRAFT_KEY"),
+           "FALSIFY_DRAFT_API": conf("draft_api", "openai"), "FALSIFY_DRAFT_MODEL": conf("draft_model", "local"),
+           "FALSIFY_DRAFT_VIEW": conf("draft_view", "files"), "FALSIFY_DRAFT_K": str(conf("draft_k", 5))}
+    return draft.from_env({k: v for k, v in env.items() if v})
+
+
 class LazyStore:
     """The Store, created on FIRST USE under this plugin's own data dir (ctx.state.data_dir, profile-scoped):
     register() writes nothing (Hermes's capability probe runs it in isolation), and there is no fallback
     path outside the plugin's data."""
 
-    def __init__(self, ctx):
-        self._ctx, self._store, self._lock = ctx, None, threading.Lock()
+    def __init__(self, ctx, get_secret=None):
+        self._ctx, self._store, self._lock, self._get_secret = ctx, None, threading.Lock(), get_secret
 
     def __getattr__(self, name):
         with self._lock:
             if self._store is None:
-                self._store = Store(str(self._ctx.state.data_dir / "store"), drafter=draft.from_env())
+                self._store = Store(str(self._ctx.state.data_dir / "store"), drafter=drafter_for(self._ctx, self._get_secret))
         return getattr(self._store, name)
 
 
-def register(ctx):
-    store, grants = LazyStore(ctx), Grants()
+def register(ctx, get_secret=None):
+    store, grants = LazyStore(ctx, get_secret), Grants()
     for name, schema, handler in make_tools(store, grants):
         ctx.register_tool(name=name, toolset="falsify", schema=schema, handler=handler,
                           description=schema["description"])

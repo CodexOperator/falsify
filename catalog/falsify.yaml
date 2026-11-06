@@ -16,7 +16,8 @@ description: >-
   'not run' and executes nothing. Stores records and results under its own plugin data dir; no
   background process. No network and no credentials by default; OPT-IN only (FALSIFY_DRAFT_URL and a claim
   registered with blind: K), it sends the claim and the base tree's files, minus every file the check names or
-  would discover, to that endpoint, with an optional key read from FALSIFY_DRAFT_KEY in the environment.
+  would discover, to that endpoint. Its URL and optional key are config_schema secrets read only through
+  Hermes's secret scope (agent.secret_scope.get_secret), never from os.environ or a file.
 maintainer: OWNER
 tier: community
 category: tools

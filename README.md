@@ -35,7 +35,8 @@ passes without the change reads VOID instead of green.
 
 **Blind mutants, for a claim with no diff** (plasma's form; docs, config, "it already works"): `register(..., blind=K)`
 asks a separate model, the DRAFTER (`falsify/draft.py`, any OpenAI-compatible endpoint: `FALSIFY_DRAFT_URL`,
-`FALSIFY_DRAFT_MODEL`), for K edits that would make the claim false. It reads the claim's words and the base tree's
+`FALSIFY_DRAFT_MODEL`; under Hermes, the URL and key are config_schema secrets read only through Hermes's secret
+scope, never `os.environ`), for K edits that would make the claim false. It reads the claim's words and the base tree's
 files, never the check. Each edit is `{path, old, new}` (one exact occurrence). The valid ones are hashed into the record
 with the sha256 of a fresh seed. At judge, with no diff, the seed must hash to its commit, and mutant
 `sha256(seed + record sha) mod K` is drawn. The agent never writes, sees in advance, or picks the mutant it is judged

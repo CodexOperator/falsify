@@ -13,3 +13,10 @@ provides_tools:
   - falsify_done
   - falsify_status
 python_dependencies: []
+config_schema:
+  draft_url: {type: secret, env: FALSIFY_DRAFT_URL, label: "Blind drafter URL", description: "OPTIONAL. An OpenAI-compatible base (e.g. a local llama.cpp server) or, with draft_api anthropic, a Messages API base. Unset = no blind mutants; falsify makes no network call. A secret because a URL can carry credentials."}
+  draft_key: {type: secret, env: FALSIFY_DRAFT_KEY, label: "Blind drafter key", description: "OPTIONAL. Sent only to the drafter URL; read through Hermes's secret scope, never written."}
+  draft_api: {type: str, choices: [openai, anthropic], default: openai, label: "Drafter API"}
+  draft_model: {type: str, default: local, label: "Drafter model"}
+  draft_view: {type: str, choices: [files, claim], default: files, label: "Drafter view", description: "files = the claim + the base files minus every file the check names or would discover; claim = the claim's words only"}
+  draft_k: {type: int, default: 5, label: "Blind mutants per claim (K)"}

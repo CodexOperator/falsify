@@ -25,8 +25,11 @@ fail). It records proved / disproved / VOID and nudges through `pre_verify`; it 
 - **Network.** None by default: core and the plugin make no network call. OPT-IN only: if the user sets
   `FALSIFY_DRAFT_URL` and registers a claim with `blind: K`, falsify sends the claim's words and the base tree's text
   files (minus every file the check names or would discover) to that endpoint to draft K blind mutants.
-- **Credentials.** None by default. The opt-in drafter reads one key from the environment variable
-  `FALSIFY_DRAFT_KEY`, sends it only to `FALSIFY_DRAFT_URL`, and never writes it.
+- **Credentials.** None by default. Under Hermes, the opt-in drafter's URL and key are `config_schema` secrets
+  (`FALSIFY_DRAFT_URL`, `FALSIFY_DRAFT_KEY`) read ONLY through `agent.secret_scope.get_secret`; the plugin never reads
+  `os.environ`, `.env` or any credential file (rule 11). An unscoped read fails closed (no drafter). The key is sent
+  only to that URL and never written. Neither is in `requires_env`, so an unset key never disables the plugin.
+  The standalone CLI (`python -m falsify`) reads the same names from its own environment.
 - **Storage.** Records, results, seeds and a hash-chained ledger under the plugin's own data dir
   (`ctx.state.data_dir/store`), created on first use; `register()` writes nothing.
 - **No background process**, no wrap or rebind of the agent's finish.
