@@ -453,6 +453,31 @@ class Blind(Base):
         self.S.register("all", self.repo, [PY, "-m", "pytest", "."], blind=2)
         self.assertEqual(self.seen[-1][1], {})   # "." names the whole tree: nothing is shown
 
+    def discovery_repo(self, extra):
+        for name, text in {"tests/test_cart.py": TEST_ADD, "conftest.py": "", "shop_test.py": TEST_ADD, **extra}.items():
+            os.makedirs(os.path.join(self.repo, os.path.dirname(name)), exist_ok=True)
+            self.write(name, text)
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "tests")
+
+    def test_a_pathless_pytest_check_withholds_pytests_discovery_set(self):
+        # plasma's red case: 'python -m pytest -q' over a repo with tests/test_cart.py must not show that file
+        self.discovery_repo({"checks/probe.py": "", "check_x.py": "", "pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["checks"]\n',
+                             "pytest.ini": "[pytest]\npython_files = check_*.py test_*.py\n"})
+        rid = self.S.register("add works", self.repo, [PY, "-m", "pytest", "-q"], blind=2)
+        files = self.seen[-1][1]
+        self.assertNotIn("tests/test_cart.py", files)
+        withheld = self.S.load("records", rid)[0]["blind"]["withheld"]
+        self.assertEqual(withheld, ["check_x.py", "checks/probe.py", "conftest.py", "shop_test.py", "test_add.py", "test_taut.py", "tests/test_cart.py"])
+        self.assertIn("subject.py", files)
+
+    def test_a_pathless_unittest_or_test_script_check_withholds_test_star(self):
+        self.discovery_repo({"run_tests": "#!/bin/sh\n"})
+        self.S.register("add works", self.repo, [PY, "-m", "unittest"], blind=2)
+        self.assertEqual(sorted(self.seen[-1][1]), ["conftest.py", "run_tests", "shop_test.py", "subject.py"])
+        self.S.register("add works", self.repo, ["./run_tests"], blind=2)   # the script itself + both default sets
+        self.assertEqual(sorted(self.seen[-1][1]), ["subject.py"])
+
     def test_the_size_cap_cut_list_is_recorded(self):
         files, withheld, cut = F.base_files(self.repo, "HEAD", max_total=len(FIXED) + 1)
         self.assertEqual((sorted(files), withheld), (["subject.py"], []))
@@ -513,6 +538,25 @@ class CommitFirst(Base):
         _, r = self.judge(self.reg("test_taut.py", claim="taut"))
         self.assertEqual(r["verdict"], "void")
         self.assertTrue(r["why"].startswith("your check passes without your change; base includes"), r["why"])
+
+    def test_widening_never_crosses_into_an_older_session(self):
+        self.reg()                                   # session A registers at the BUGGY base
+        self.write("subject.py", FIXED)
+        self.commit("someone's fix, before this session")
+        later = F.Store(self.S.root)                 # the same store, a NEW session
+        rid = later.register("add works", self.repo, {"argv": [PY, "test_add.py"]})
+        _, r = later.judge(rid, approve=YES)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("no mutant", r["why"])
+        self.assertNotIn("base_widened_to", r["evidence"])
+        same = F.Store(self.S.root, session=self.S.session)   # the SAME session, a new process: widens
+        _, r = same.judge(same.register("add works", self.repo, {"argv": [PY, "test_add.py"]}), approve=YES)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+
+    def test_the_session_is_in_the_hash_chained_ledger(self):
+        rid = self.S.register("c", self.repo, [PY, "test_add.py"], session="hermes-s1")
+        (e,) = [x for x in self.S.ledger()[0] if x.get("record") == rid]
+        self.assertEqual(e["session"], "hermes-s1")
 
     def test_with_no_earlier_ancestor_there_is_still_no_mutant(self):
         self.write("subject.py", FIXED)

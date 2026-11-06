@@ -74,10 +74,11 @@ def make_pre_tool_call(store):
 
 
 def make_tools(store, grants):
-    def register(args, **_):
+    def register(args, session_id=None, **_):
         try:
             rid = store.register(args.get("claim"), args.get("repo"), args.get("check"), args.get("base") or "HEAD",
-                                 args.get("note", ""), args.get("sanity"), args.get("keep") or (), args.get("blind") or 0)
+                                 args.get("note", ""), args.get("sanity"), args.get("keep") or (), args.get("blind") or 0,
+                                 session=session_id)
         except Refused as e:
             return _json({"error": str(e)})
         return _json({"record": rid})

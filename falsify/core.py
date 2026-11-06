@@ -40,7 +40,8 @@ revert). A drawn mutant that does not apply is VOID "unrevertable"; one the chec
 on the drawn blind mutant". The agent never writes, sees in advance, or picks the mutant it is judged against.
 
 COMMIT-FIRST: an agent that commits its change and re-registers at HEAD leaves no diff. With no diff, the judge first
-widens to this store's EARLIEST registered base (same repo) that is a strict ancestor of the record's base, and
+widens to the EARLIEST base registered in the SAME SESSION (the ledger's session field; same repo) that is a strict
+ancestor of the record's base, and
 derives the mutant from that change as usual, saying "base includes this session's commits". Only a base with no
 such ancestor (or no change since it) goes blind.
 
@@ -140,22 +141,82 @@ def revert(dst, patch):
         shutil.rmtree(os.path.join(dst, ".git"), ignore_errors=True)
 
 
-def named_paths(checks, keep=()):
+PYTEST_FILES = ("test_*.py", "*_test.py", "conftest.py")
+UNITTEST_FILES = ("test*.py",)
+
+
+def _runner(argv):
+    """-> "pytest", "unittest", "test" (any other test runner: a script or a subcommand named test), or None."""
+    base = [os.path.basename(a) for a in argv]
+    if any(b in ("pytest", "py.test") for b in base):
+        return "pytest"
+    if "unittest" in argv:
+        return "unittest"
+    return "test" if any("test" in b for b in base) else None
+
+
+def discovery_globs(runner, config):
+    """the files a runner with NO path argument discovers: pytest's defaults plus testpaths / python_files from the
+    base's pytest.ini, tox.ini, setup.cfg or pyproject.toml (config: {name: text}); unittest's test*.py; both for any
+    other test runner. -> (basename globs, directories)."""
+    import configparser
+    globs, dirs = set(), set()
+    if runner in ("pytest", "test"):
+        globs.update(PYTEST_FILES)
+        for name, section in (("pytest.ini", "pytest"), ("tox.ini", "pytest"), ("setup.cfg", "tool:pytest")):
+            if name in config:
+                cp = configparser.ConfigParser(interpolation=None)
+                try:
+                    cp.read_string(config[name])
+                except configparser.Error:
+                    continue
+                if cp.has_section(section):
+                    globs.update(cp.get(section, "python_files", fallback="").split())
+                    dirs.update(cp.get(section, "testpaths", fallback="").split())
+        if "pyproject.toml" in config:
+            try:
+                import tomllib
+                opts = tomllib.loads(config["pyproject.toml"]).get("tool", {}).get("pytest", {}).get("ini_options", {})
+            except Exception:
+                opts = {}
+            for key, into in (("python_files", globs), ("testpaths", dirs)):
+                v = opts.get(key, [])
+                into.update(v.split() if isinstance(v, str) else [str(x) for x in v])
+    if runner in ("unittest", "test"):
+        globs.update(UNITTEST_FILES)
+    return globs, {os.path.normpath(d) for d in dirs}
+
+
+def named_paths(checks, keep=(), config=None, tracked=None):
     """-> withhold(path) -> bool: True for a repo path the check or sanity argv names (each token read as a path
-    relative to that check's cwd, a pytest node id's file part included; a token naming a directory names everything
-    under it, "." the whole tree) or a KEEP glob matches. What the check runs is never shown to a blind drafter."""
-    names = set()
+    relative to that check's cwd, a pytest node id's file part included, a relative argv[0] script too; a token naming
+    a directory names everything under it, "." the whole tree), a KEEP glob matches, or, when a check runs a test
+    runner with NO path argument, the runner would DISCOVER (discovery_globs). What the check runs is never shown to a
+    blind drafter. tracked (the base's paths, if given): a token counts as a PATH argument only if it names a tracked
+    file or directory, or ".", so `-m pytest -q` names no path and its discovery set is withheld."""
+    names, globs, dirs = set(), set(), set()
+    real = (lambda n: n == "." or n in tracked or any(t.startswith(n + "/") for t in tracked)) if tracked is not None else (lambda n: True)
     for c in checks:
         if not c:
             continue
-        for tok in c["argv"][1:]:
-            if tok.startswith("-") or os.path.isabs(tok):
+        mine = set()
+        for i, tok in enumerate(c["argv"]):
+            if tok.startswith("-") or os.path.isabs(tok) or (i == 0 and "/" not in tok):
                 continue
             n = os.path.normpath(os.path.join(c["cwd"], tok.split("::")[0]))
-            if n.split(os.sep)[0] != "..":
-                names.add(n)
+            if n.split(os.sep)[0] != ".." and real(n):
+                (names if i == 0 else mine).add(n)
+        names |= mine
+        r = _runner(c["argv"])
+        if r and not mine:
+            g, d = discovery_globs(r, config or {})
+            globs |= g
+            dirs |= {os.path.normpath(os.path.join(c["cwd"], x)) for x in d}
+
     def withhold(path):
-        return any(n == "." or path == n or path.startswith(n + "/") for n in names) or any(fnmatch.fnmatch(path, g) for g in keep)
+        return (any(n == "." or path == n or path.startswith(n + "/") for n in names | dirs)
+                or any(fnmatch.fnmatch(path, g) for g in keep)
+                or any(fnmatch.fnmatch(os.path.basename(path), g) for g in globs))
     return withhold
 
 
@@ -251,9 +312,12 @@ def _norm_check(c, field="check"):
 
 
 class Store:
-    def __init__(self, root, drafter=None):
-        """drafter(claim, files) -> [{path, old, new}, ...]: the blind mutant author (falsify.draft.make_drafter), or None."""
+    def __init__(self, root, drafter=None, session=None):
+        """drafter(claim, files) -> [{path, old, new}, ...]: the blind mutant author (falsify.draft.make_drafter), or None.
+        session: the id every register is logged under (default FALSIFY_SESSION, else one id per Store): the commit-first
+        widening never looks outside the record's own session."""
         self.root, self.drafter = os.path.abspath(root), drafter
+        self.session = session or os.environ.get("FALSIFY_SESSION") or secrets.token_hex(8)
         for d in ("records", "results", "seeds"):
             os.makedirs(os.path.join(self.root, d), exist_ok=True)
 
@@ -285,7 +349,7 @@ class Store:
         return json.loads(b), None
 
     # ---- register ----
-    def register(self, claim, repo, check, base="HEAD", note="", sanity=None, keep=(), blind=0):
+    def register(self, claim, repo, check, base="HEAD", note="", sanity=None, keep=(), blind=0, session=None):
         if not isinstance(claim, str) or not claim.strip():
             raise refused("claim", "claim must be a non-empty string")
         if not isinstance(repo, str) or not repo.strip():
@@ -312,7 +376,14 @@ class Store:
                 raise refused("blind", "blind must be an int from 1 to 20 (K mutants to draft)")
             if self.drafter is None:
                 raise Refused("blind: this store has no drafter (falsify.draft.make_drafter; the plugin reads FALSIFY_DRAFT_URL)")
-            files, withheld, cut = base_files(top, b, named_paths((rec["check"], rec.get("sanity")), rec.get("keep", ())))
+            config = {}
+            for name in ("pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml"):
+                try:
+                    config[name] = git(top, "show", f"{b}:{name}").decode()
+                except (Refused, UnicodeDecodeError):
+                    pass
+            tracked = set(git(top, "ls-tree", "-r", "--name-only", "-z", b).decode().split("\0")) - {""}
+            files, withheld, cut = base_files(top, b, named_paths((rec["check"], rec.get("sanity")), rec.get("keep", ()), config, tracked))
             try:
                 drafted = list(self.drafter(claim, files) or [])[:blind]
             except Exception as e:   # a drafter that fails drafts nothing; the claim stays registrable
@@ -330,7 +401,7 @@ class Store:
                 with open(p, "x") as f:
                     f.write(seed)
         h = self._write_once("records", rec)
-        self._log({"event": "register", "record": h, "claim": claim})
+        self._log({"event": "register", "record": h, "claim": claim, "session": str(session or self.session)})
         return h
 
     # ---- judge ----
@@ -351,7 +422,7 @@ class Store:
             return self._result(rid, rec["claim"], "void", f"not run: {e}")
         note = ""
         if not diff:   # commit-first dodge: widen to this session's earliest registered base that is an ancestor of ours
-            wide = self._earliest_ancestor(rec)
+            wide = self._earliest_ancestor(rid, rec)
             if wide:
                 try:
                     d2 = change(rec["repo"], wide[1]["base_tree"], F, rec.get("keep", ()))
@@ -405,11 +476,16 @@ class Store:
             f"; {un} hunk(s) unrevertable alone" if un else "")
         return R("proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
 
-    def _earliest_ancestor(self, rec):
-        """-> (record sha, record) of the EARLIEST registration in this store's ledger, same repo, whose base is a strict
-        ancestor of rec's base, or None."""
-        for e in self.ledger()[0]:
-            if e.get("event") != "register":
+    def _earliest_ancestor(self, rid, rec):
+        """-> (record sha, record) of the EARLIEST registration in this store's ledger from the SAME SESSION as rid's
+        latest registration (a ledger line, hash-chained), same repo, whose base is a strict ancestor of rec's base, or
+        None. A store that outlives a session never widens to an older session's base."""
+        regs = [e for e in self.ledger()[0] if e.get("event") == "register"]
+        mine = [e.get("session") for e in regs if e.get("record") == rid]
+        if not mine or mine[-1] is None:
+            return None
+        for e in regs:
+            if e.get("session") != mine[-1]:
                 continue
             r, _ = self.load("records", e["record"])
             if not r or r["repo"] != rec["repo"] or r["base"] == rec["base"]:

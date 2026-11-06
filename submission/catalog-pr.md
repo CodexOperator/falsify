@@ -1,0 +1,37 @@
+<!-- DRAFT, private: never opened as a PR until the owner's yes. repo / sha / maintainer are placeholders in
+     catalog/falsify.yaml. -->
+# Add falsify to the plugin catalog
+
+**What it is.** A Hermes Agent plugin that makes a coding claim falsifiable. The agent pre-registers a claim, its check
+command and the base commit before changing anything. After the change, falsify judges the check against the agent's
+final tree (it must pass) and against copies with the agent's own change reverted, whole and hunk by hunk (it must
+fail). It records proved / disproved / VOID and nudges through `pre_verify`; it never blocks completion.
+
+**Surface.** Tools `falsify_register`, `falsify_judge`, `falsify_done`, `falsify_status`; hooks `pre_verify`,
+`pre_tool_call`, `post_approval_response`; one skill. `python_dependencies: []` (stdlib), `requires_hermes >=0.23.0`.
+
+## Disclosures (rule 13)
+
+- **Shell runs.** `falsify_judge` RUNS the check command the agent registered (and its optional `sanity` command) as
+  ordinary subprocesses with the user's permissions, on the final tree and on each reverted copy. There is NO sandbox:
+  a check that deletes files, reaches the network or reads secrets does so when approved.
+- **Approval per run.** Before anything runs, `pre_tool_call` returns `approve` with the exact argv and the record's
+  hash, so Hermes's own human gate asks. Only a human `once` / `session` / `always` answer grants ONE run. Under cron,
+  gateway auto-approve, yolo or any run no human answered, the judge records VOID "not run" and executes nothing.
+- **Reads of the code under test.** The final tree is read through a private git index (`git add -A` into a temp
+  index); the repo's own index, history and working tree are never written.
+- **The temp copy.** Every run happens in a temporary copy of the working tree (`.git` excluded, ignored files
+  included), deleted afterwards.
+- **Network.** None by default: core and the plugin make no network call. OPT-IN only: if the user sets
+  `FALSIFY_DRAFT_URL` and registers a claim with `blind: K`, falsify sends the claim's words and the base tree's text
+  files (minus every file the check names or would discover) to that endpoint to draft K blind mutants.
+- **Credentials.** None by default. The opt-in drafter reads one key from the environment variable
+  `FALSIFY_DRAFT_KEY`, sends it only to `FALSIFY_DRAFT_URL`, and never writes it.
+- **Storage.** Records, results, seeds and a hash-chained ledger under the plugin's own data dir
+  (`ctx.state.data_dir/store`), created on first use; `register()` writes nothing.
+- **No background process**, no wrap or rebind of the agent's finish.
+
+## Validation
+
+`python3 -m unittest discover -s tests` (stdlib). The catalog entry passes `scripts/validate_plugin_catalog.py`
+(to be re-run at the pinned sha).
