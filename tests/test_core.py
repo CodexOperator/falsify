@@ -74,7 +74,10 @@ class Register(Base):
 
 
     def test_a_bare_list_is_the_argv(self):
-        self.assertEqual(self.S.register("c", self.repo, [PY, "test_add.py"]), self.S.register("c", self.repo, {"argv": [PY, "test_add.py"]}))
+        # registered_at is stamped to the second and is part of the record (and so of its id): pin it, or two calls that
+        # straddle a second boundary read as two different records
+        with unittest.mock.patch.object(F, "now", return_value="2026-01-01T00:00:00Z"):
+            self.assertEqual(self.S.register("c", self.repo, [PY, "test_add.py"]), self.S.register("c", self.repo, {"argv": [PY, "test_add.py"]}))
         self.assertEqual(self.S.load("records", self.S.register("c", self.repo, ["x"], sanity=["y"]))[0]["sanity"]["argv"], ["y"])
 
     def test_every_schema_error_shows_the_expected_shape_and_an_example(self):
