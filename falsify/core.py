@@ -10,6 +10,9 @@ v2: the mutant is DERIVED from the agent's own change, never written by the agen
             and MUST PASS; then on a temp copy with the WHOLE change reverted it MUST FAIL; then each HUNK is reverted
             alone: "the check covers k of h hunks of your change". Same argv, different trees: one approval covers it.
               check fails on the final tree               -> disproved (a full result, never an error)
+              a revert that does not apply, a reverted tree that fails the pre-registered SANITY argv, or a
+              check that dies on it with an rc outside the pinned KILL_RC (pytest: 2-5 are collection / usage
+              errors, not kills) or times out                -> VOID "unrevertable", never a kill
               check passes with the whole change reverted -> VOID "your check passes without your change"
               no change (B == F)                           -> VOID "no mutant"
               otherwise                                    -> proved, with k of h
@@ -21,6 +24,9 @@ R1 (rule 12): the judge runs ONLY the argv already in the hashed record, and onl
 judge() takes approve(kind, argv, cwd, record_sha) -> bool, asked BEFORE anything runs; no approver, a "no", or
 interactive=False (cron, gateway, any non-interactive caller) = VOID 'not run', never a silent run.
 R2 (rule 9): falsify never blocks completion; it records verdicts and NUDGES (falsify.adapter.make_pre_verify).
+
+KEEP: pre-registered globs (e.g. "tests/**") whose part of the change is never reverted, so a mutant never "kills"
+the check by deleting the check's own new test (a trivial kill); those hunks are reported, not measured.
 
 Temp copies exclude `.git` (the check runs on files, not history) and include ignored files (a venv, build outputs),
 so both trees differ ONLY by the change.
@@ -74,11 +80,12 @@ def final_tree(repo):
         return git(repo, "write-tree", env=env).decode().strip()
 
 
-def change(repo, base_tree, tree):
+def change(repo, base_tree, tree, keep=()):
     """diff(base, final) with ZERO context lines: every changed region is its own hunk (git's default 3 lines of
     context would merge nearby edits into one). It is only ever applied, reversed, onto an exact copy of the final
     tree, so the missing context cannot misplace it."""
-    return git(repo, "diff", "-U0", "--binary", "--no-renames", "--full-index", base_tree, tree)
+    excl = [f":(exclude,glob){k}" for k in keep]
+    return git(repo, "diff", "-U0", "--binary", "--no-renames", "--full-index", base_tree, tree, "--", ".", *excl)
 
 
 def hunks(diff):
@@ -120,7 +127,11 @@ def _norm_check(c):
     cwd = os.path.normpath(c.get("cwd", "."))
     if os.path.isabs(cwd) or cwd.split(os.sep)[0] == "..":
         raise Refused("check.cwd must be relative to the repo and inside it")
-    return {"argv": list(c["argv"]), "cwd": cwd, "expect_rc": int(c.get("expect_rc", 0)),
+    kill = sorted({int(x) for x in c.get("kill_rc", [1])})
+    exp = int(c.get("expect_rc", 0))
+    if not kill or exp in kill:
+        raise Refused("check.kill_rc must be a non-empty list of exit codes that excludes expect_rc")
+    return {"argv": list(c["argv"]), "cwd": cwd, "expect_rc": exp, "kill_rc": kill,
             "timeout_s": float(c.get("timeout_s", DEFAULT_TIMEOUT_S))}
 
 
@@ -158,13 +169,20 @@ class Store:
         return json.loads(b), None
 
     # ---- register ----
-    def register(self, claim, repo, check, base="HEAD", note=""):
+    def register(self, claim, repo, check, base="HEAD", note="", sanity=None, keep=()):
         if not isinstance(claim, str) or not claim.strip():
             raise Refused("claim must be a non-empty string")
         top = git(os.path.abspath(repo), "rev-parse", "--show-toplevel").decode().strip()
         b = git(top, "rev-parse", "--verify", f"{base}^{{commit}}").decode().strip()
         rec = {"claim": claim, "repo": top, "base": b, "base_tree": git(top, "rev-parse", f"{b}^{{tree}}").decode().strip(),
                "check": _norm_check(check), "note": note, "registered_at": now()}
+        if sanity is not None:
+            s = _norm_check(sanity)
+            rec["sanity"] = {k: s[k] for k in ("argv", "cwd", "expect_rc", "timeout_s")}
+        if keep:
+            if not isinstance(keep, (list, tuple)) or not all(isinstance(k, str) and k and not k.startswith(("/", ":")) for k in keep):
+                raise Refused("keep must be a list of repo-relative globs")
+            rec["keep"] = sorted(set(keep))
         return self._write_once("records", rec)
 
     # ---- judge ----
@@ -179,50 +197,67 @@ class Store:
         chk = rec["check"]
         try:
             F = final_tree(rec["repo"])
-            diff = change(rec["repo"], rec["base_tree"], F)
+            diff = change(rec["repo"], rec["base_tree"], F, rec.get("keep", ()))
+            kept = change(rec["repo"], rec["base_tree"], F) != diff if rec.get("keep") else False
         except Refused as e:
             return self._result(rid, rec["claim"], "void", f"not run: {e}")
-        ev = {"final_tree": F, "diff_sha256": sha(diff)}
+        ev = {"final_tree": F, "diff_sha256": sha(diff), "kept_paths_changed": kept}
         if not diff:
-            return self._result(rid, rec["claim"], "void", "no mutant: the tree has no change since the base", **ev)
-        if approve("check", list(chk["argv"]), os.path.join(rec["repo"], chk["cwd"]), rid) is not True:
-            return self._result(rid, rec["claim"], "void", "not run: the check was not approved", **ev)
+            return self._result(rid, rec["claim"], "void", "no mutant: the tree has no change since the base"
+                                + (" outside the kept paths" if kept else ""), **ev)
+        san = rec.get("sanity")
+        for kind, c in (("check", chk),) + ((("sanity", san),) if san else ()):
+            if approve(kind, list(c["argv"]), os.path.join(rec["repo"], c["cwd"]), rid) is not True:
+                return self._result(rid, rec["claim"], "void", f"not run: the {kind} was not approved", **ev)
         units = hunks(diff)
         ev["hunks_total"] = len(units)
         with tempfile.TemporaryDirectory(prefix="falsify-") as tmp:
             fin = os.path.join(tmp, "final")
             copy_tree(rec["repo"], fin)
+            if san:
+                s = run_check(san, fin)
+                ev["final_sanity_run"] = s
+                if not s["passed"]:
+                    return self._result(rid, rec["claim"], "void", "the sanity check fails on your final tree: no reading", **ev)
             c = run_check(chk, fin)
             ev["final_run"] = c
             if c["timed_out"]:
                 return self._result(rid, rec["claim"], "void", "the check timed out on the final tree: no reading", **ev)
             if not c["passed"]:
                 return self._result(rid, rec["claim"], "disproved", "the check FAILS on your final tree", **ev)
-            r, ev["reverted_run"] = self._mutant(chk, rec["repo"], tmp, "reverted", diff)
+            r, ev["reverted_run"] = self._mutant(chk, san, rec["repo"], tmp, "reverted", diff)
             if r != "killed":
                 return self._result(rid, rec["claim"], "void", r, **ev)
             cover = []
             for i, (path, patch) in enumerate(units[:max_hunks]):
-                v, run = self._mutant(chk, rec["repo"], tmp, f"hunk{i}", patch)
+                v, run = self._mutant(chk, san, rec["repo"], tmp, f"hunk{i}", patch)
                 cover.append({"path": path, "patch_sha256": sha(patch), "outcome": v, "run": run})
         k = sum(x["outcome"] == "killed" for x in cover)
-        ev.update(hunks_measured=len(cover), hunks_killed=k, hunks=cover)
-        more = f" ({len(units) - len(cover)} beyond the cap not measured)" if len(units) > len(cover) else ""
+        un = sum(x["outcome"].startswith("unrevertable") for x in cover)
+        ev.update(hunks_measured=len(cover), hunks_killed=k, hunks_unrevertable=un, hunks=cover)
+        more = (f" ({len(units) - len(cover)} beyond the cap not measured)" if len(units) > len(cover) else "") + (
+            f"; {un} hunk(s) unrevertable alone" if un else "")
         return self._result(rid, rec["claim"], "proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
 
-    def _mutant(self, chk, repo, tmp, name, patch):
-        """-> (outcome, run): killed, or the VOID reason."""
+    def _mutant(self, chk, san, repo, tmp, name, patch):
+        """-> (outcome, run): killed, or the VOID reason. Only an rc in the pinned kill_rc is a kill."""
         d = os.path.join(tmp, name)
         copy_tree(repo, d)
         try:
             err = revert(d, patch)
             if err:
                 return f"unrevertable: the revert does not apply ({err})", None
+            if san:
+                s = run_check(san, d)
+                if not s["passed"]:
+                    return "unrevertable: the reverted tree fails the sanity check", s
             r = run_check(chk, d)
             if r["timed_out"]:
                 return "unrevertable: the check timed out on the reverted tree", r
             if r["passed"]:
                 return "your check passes without your change", r
+            if r["rc"] not in chk["kill_rc"]:
+                return f"unrevertable: the check died with rc {r['rc']}, not a kill (kill_rc {chk['kill_rc']})", r
             return "killed", r
         finally:
             shutil.rmtree(d, ignore_errors=True)
@@ -307,7 +342,7 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="falsify", description=__doc__.split("\n")[0])
     ap.add_argument("--store", default=os.environ.get("FALSIFY_STORE", ".falsify"))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("register", help="register BEFORE the work: a JSON file {claim, repo, check, base?, note?}")
+    r = sub.add_parser("register", help="register BEFORE the work: a JSON file {claim, repo, check, base?, note?, sanity?, keep?}")
     r.add_argument("file")
     j = sub.add_parser("judge", help="judge a registered record by its sha, AFTER the work")
     j.add_argument("record")
@@ -321,7 +356,8 @@ def main(argv):
     try:
         if a.cmd == "register":
             spec = json.loads(read_bytes(a.file))
-            print(S.register(spec["claim"], spec["repo"], spec["check"], spec.get("base", "HEAD"), spec.get("note", "")))
+            print(S.register(spec["claim"], spec["repo"], spec["check"], spec.get("base", "HEAD"), spec.get("note", ""),
+                             spec.get("sanity"), spec.get("keep", ())))
         elif a.cmd == "judge":
             yes = a.approve or (sys.stdin.isatty() and input(f"run record {a.record[:12]}'s check on your change and its reverts? [y/N] ").strip().lower() == "y")
             h, res = S.judge(a.record, approve=(lambda *_: True) if yes else None, interactive=a.approve or sys.stdin.isatty())

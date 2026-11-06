@@ -77,7 +77,7 @@ def make_tools(store, grants):
     def register(args, **_):
         try:
             rid = store.register(args.get("claim"), args.get("repo"), args.get("check"), args.get("base") or "HEAD",
-                                 args.get("note", ""))
+                                 args.get("note", ""), args.get("sanity"), args.get("keep") or ())
         except Refused as e:
             return _json({"error": str(e)})
         return _json({"record": rid})
@@ -101,7 +101,8 @@ def make_tools(store, grants):
 
     argv = {"type": "object", "properties": {
         "argv": {"type": "array", "items": {"type": "string"}}, "cwd": {"type": "string"},
-        "expect_rc": {"type": "integer"}, "timeout_s": {"type": "number"}}, "required": ["argv"]}
+        "expect_rc": {"type": "integer"}, "timeout_s": {"type": "number"},
+        "kill_rc": {"type": "array", "items": {"type": "integer"}}}, "required": ["argv"]}
 
     def schema(name, desc, props, req):
         return {"name": name, "description": desc,
@@ -113,7 +114,8 @@ def make_tools(store, grants):
             "pass; cwd relative to the repo) and the base commit (default HEAD). Hashed before any run; returns the "
             "record sha. Runs nothing. The mutant is derived later: your own change, reverted.",
             {"claim": {"type": "string"}, "repo": {"type": "string"}, "check": argv, "base": {"type": "string"},
-             "note": {"type": "string"}}, ["claim", "repo", "check"]), register),
+             "note": {"type": "string"}, "sanity": argv,
+             "keep": {"type": "array", "items": {"type": "string"}}}, ["claim", "repo", "check"]), register),
         ("falsify_judge", schema("falsify_judge",
             "Judge a registered claim after your change: once a HUMAN approves the exact argv, run the check on your "
             "final tree (must pass) and with your change reverted, whole and per hunk (must fail). proved (k of h "

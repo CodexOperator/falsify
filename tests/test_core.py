@@ -111,14 +111,14 @@ class Judge(Base):
         self.assertIn("no mutant", r["why"])
 
     def test_untracked_and_committed_changes_both_count_and_the_users_index_is_untouched(self):
-        rid = self.reg("test_new.py")
+        rid = self.S.register("X is 7", self.repo, {"argv": [PY, "test_new.py"]}, keep=["test_new.py"])   # the check's own new test is kept
         self.write("newmod.py", "X = 7\n")
         self.write("test_new.py", "from newmod import X\nassert X == 7\n")
         sh(self.repo, "git", "add", "test_new.py")
         before = subprocess.run(["git", "-C", self.repo, "status", "--porcelain"], capture_output=True, text=True).stdout
         _, r = self.judge(rid)
         self.assertEqual(r["verdict"], "proved", r["why"])
-        self.assertEqual(r["evidence"]["hunks_total"], 2)
+        self.assertEqual([h["path"] for h in r["evidence"]["hunks"]], ["newmod.py"])   # untracked, still the change
         after = subprocess.run(["git", "-C", self.repo, "status", "--porcelain"], capture_output=True, text=True).stdout
         self.assertEqual(before, after)
 
@@ -159,6 +159,82 @@ class Judge(Base):
         u = F.hunks(d)
         self.assertEqual([p for p, _ in u], ["x", "x", "y.bin"])
         self.assertTrue(all(b.startswith(b"diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@") for _, b in u[:2]))
+
+
+class KillQuality(Base):
+    """Step 2: only an rc in the pinned kill_rc is a kill; a sanity failure or a dead run is VOID 'unrevertable'."""
+    def commit(self, msg):
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", msg)
+
+    def test_an_rc_outside_kill_rc_is_unrevertable_not_a_kill(self):
+        self.write("test_rc3.py", "import sys\nfrom subject import add\nsys.exit(0 if add(2, 3) == 5 else 3)\n")
+        self.commit("rc3")
+        bad = self.reg("test_rc3.py")                       # default kill_rc [1]: rc 3 is not a kill
+        good = self.reg("test_rc3.py", claim="rc3 pinned", kill_rc=[3])
+        self.write("subject.py", FIXED)
+        _, r = self.judge(bad)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("unrevertable: the check died with rc 3, not a kill", r["why"])
+        _, r = self.judge(good)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+
+    def test_kill_rc_must_exclude_expect_rc(self):
+        for k in ([0], []):
+            with self.assertRaises(F.Refused):
+                self.reg(kill_rc=k)
+
+    def test_a_reverted_test_file_is_not_a_kill_unless_kept(self):
+        """the agent adds the fix AND its test: reverting the change deletes the test itself (python: rc 2, file
+        missing). Without keep that is VOID unrevertable; keep=['tests/**'] leaves the test in place -> proved."""
+        os.makedirs(os.path.join(self.repo, "tests"))
+        plain = self.S.register("add works", self.repo, {"argv": [PY, "tests/t_add.py"]})
+        kept = self.S.register("add works (kept)", self.repo, {"argv": [PY, "tests/t_add.py"]}, keep=["tests/**"])
+        self.write("subject.py", FIXED)
+        self.write("tests/t_add.py", "import sys; sys.path.insert(0, '.')\nfrom subject import add\nassert add(2, 3) == 5\n")
+        _, r = self.judge(plain)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("unrevertable", r["why"])
+        _, r = self.judge(kept)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+        self.assertTrue(r["evidence"]["kept_paths_changed"])
+        self.assertEqual([h["path"] for h in r["evidence"]["hunks"]], ["subject.py"])
+
+    def test_a_change_only_in_kept_paths_is_no_mutant(self):
+        rid = self.S.register("c", self.repo, {"argv": [PY, "test_add.py"]}, keep=["test_*.py"])
+        self.write("test_add.py", TEST_ADD + "# more\n")
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("outside the kept paths", r["why"])
+
+    def test_a_hunk_that_breaks_the_import_is_unrevertable_by_sanity_not_a_kill(self):
+        """the change adds newmod.py and subject.py imports it: reverting newmod.py ALONE breaks the import, which
+        the sanity argv catches -> that hunk is unrevertable, never counted as killed."""
+        san = {"argv": [PY, "-c", "import subject"]}
+        rid = self.S.register("add works", self.repo, {"argv": [PY, "test_add.py"]}, sanity=san)
+        self.write("newmod.py", "def plus(a, b):\n    return a + b\n")
+        self.write("subject.py", "from newmod import plus\n" + FIXED.replace("return a + b", "return plus(a, b)"))
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+        out = {h["path"]: h["outcome"] for h in r["evidence"]["hunks"] if h["path"] == "newmod.py"}
+        self.assertEqual(out, {"newmod.py": "unrevertable: the reverted tree fails the sanity check"})
+        self.assertGreaterEqual(r["evidence"]["hunks_unrevertable"], 1)
+        self.assertIn("unrevertable alone", r["why"])
+
+    def test_a_sanity_that_fails_on_the_final_tree_is_void(self):
+        rid = self.S.register("c", self.repo, {"argv": [PY, "test_add.py"]}, sanity={"argv": [PY, "-c", "import nosuchmod"]})
+        self.write("subject.py", FIXED)
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("sanity check fails on your final tree", r["why"])
+
+    def test_the_sanity_argv_is_approved_too(self):
+        seen = []
+        rid = self.S.register("c", self.repo, {"argv": [PY, "test_add.py"]}, sanity={"argv": [PY, "-c", "import subject"]})
+        self.write("subject.py", FIXED)
+        _, r = self.S.judge(rid, approve=lambda k, argv, *a: seen.append(k) or k != "sanity")
+        self.assertEqual(seen, ["check", "sanity"])
+        self.assertIn("the sanity was not approved", r["why"])
 
 
 class Approval(Base):
