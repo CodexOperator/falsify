@@ -69,5 +69,5 @@
   specification tier, where its own check fails on its own (correct) final tree. falsify judges the agent's own check;
   a check that is wrong on a correct fix reads disproved, and the derived mutant cannot rescue it. In the specification
   tier, the derived mutant is the unimplemented stub, so PROVED is near-automatic there and a hidden test carries the
-  verdict; that is where false assurance could hide. On g5.53 none occurred in that tier: the Haiku loop's 4 were in
-  tiers A (3) and B (1).
+  verdict; that is where false assurance could hide. On g5.53 the Haiku loop's 4 false assurances were in tiers A (3)
+  and B (1), none in C; the node gives no tier split for the local Qwen3-4B arm's 3.
