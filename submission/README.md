@@ -13,7 +13,7 @@ falsify records the verdict and nudges the agent before it finishes. It never bl
 Hermes Agent >= 0.23.0, Python stdlib only (git on PATH):
 
 ```
-hermes plugins install <repo-url>      # or clone into your plugins dir; the plugin is rooted at the repo
+hermes plugins install CodexOperator/{REPO_NAME} --enable
 ```
 
 The agent gets four tools (`falsify_register`, `falsify_judge`, `falsify_done`, `falsify_status`), a `pre_verify`

@@ -1,5 +1,5 @@
-<!-- DRAFT, private: never opened as a PR until the owner's yes. repo / sha / maintainer are placeholders in
-     catalog/falsify.yaml. -->
+<!-- DRAFT, private: never opened as a PR until the owner's yes. the repo is CodexOperator/{REPO_NAME}; render
+     catalog/falsify.yaml with catalog/fill.py <repo name> <sha> once the owner names the repo. -->
 # Add falsify to the plugin catalog
 
 **What it is.** A Hermes Agent plugin that makes a coding claim falsifiable. The agent pre-registers a claim, its check
@@ -36,5 +36,5 @@ fail). It records proved / disproved / VOID and nudges through `pre_verify`; it 
 
 ## Validation
 
-`python3 -m unittest discover -s tests` (stdlib). The catalog entry passes `scripts/validate_plugin_catalog.py`
-(to be re-run at the pinned sha).
+`python3 -m unittest discover -s tests` (stdlib). The catalog entry, rendered by `catalog/fill.py`, passes `scripts/validate_plugin_catalog.py`
+(re-run at the pinned sha); `hermes plugins validate` passes.
