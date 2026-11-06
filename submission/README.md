@@ -47,6 +47,12 @@ secrets will do so when approved. Every run first asks a human for the exact arg
 proofops seals a receipt after the run; falsify commits the check's hash before the run and judges it against a
 mutant derived from the agent's own change, so a check that passes without the change reads VOID, not green.
 
+## Why a positive control
+
+The suite's positive control (M-GOLD: the reference fix, with an honest check, must read PROVED) caught a bug in falsify
+itself. Bytecode copied into the mutant tree outlived a same-second, same-size revert, so an honest moved-line fix read
+VOID. Fixed: mutant copies carry no bytecode. Source: goal:g5.53 M-GOLD, task a08 (director-thought-science).
+
 ## Measured (goal:g5.52 only)
 
 | reading | value | source |

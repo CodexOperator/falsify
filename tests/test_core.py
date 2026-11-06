@@ -1,6 +1,6 @@
 """Tests for falsify.core and falsify.adapter (v2: the mutant is derived from the agent's own change).
 stdlib unittest; every subject is a tiny git repo in a temp dir, every check a python script in it."""
-import contextlib, io, json, os, subprocess, sys, tempfile, unittest
+import contextlib, io, json, os, subprocess, sys, tempfile, unittest, unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from falsify import adapter as A  # noqa: E402
@@ -565,6 +565,42 @@ class CommitFirst(Base):
         self.assertEqual(r["verdict"], "void")
         self.assertIn("no mutant", r["why"])
         self.assertNotIn("base_widened_to", r["evidence"])
+
+
+SWAP_BUG = "def f():\n    x = 1\n    x = 2\n    return x\n"      # returns 2
+SWAP_FIX = "def f():\n    x = 2\n    x = 1\n    return x\n"      # a moved line: same size, returns 1
+
+
+class Bytecode(Base):
+    """M-GOLD's bug (g5.53 a08): bytecode copied into a mutant tree can outlive the revert. Here the FIXED code's .pyc
+    is unchecked-hash (PEP 552: python loads it without looking at the source), the deterministic form of a copied
+    .pyc whose source mtime + size still match after a same-second, same-size revert."""
+    def setUp(self):
+        super().setUp()
+        self.write("swapped.py", SWAP_BUG)
+        self.write("test_f.py", "from swapped import f\nassert f() == 1\n")
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "swap")
+        self.rid = self.reg("test_f.py", claim="f returns 1")
+        self.write("swapped.py", SWAP_FIX)
+        self.assertEqual(len(SWAP_BUG), len(SWAP_FIX))
+        sh(self.repo, PY, "-m", "py_compile", "swapped.py")   # writes __pycache__ beside the source
+        import py_compile
+        py_compile.compile(os.path.join(self.repo, "swapped.py"), invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+
+    def test_a_same_size_moved_line_fix_with_an_honest_check_reads_proved(self):
+        _, r = self.judge(self.rid)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+
+    def test_copying_bytecode_into_the_mutant_tree_would_read_void(self):
+        old = lambda repo, dst: F.shutil.copytree(repo, dst, symlinks=True, ignore=F.shutil.ignore_patterns(".git"))
+        with unittest.mock.patch.object(F, "copy_tree", old):
+            _, r = self.judge(self.rid)
+        self.assertEqual((r["verdict"], r["why"]), ("void", "your check passes without your change"))
+
+    def test_every_check_runs_without_writing_bytecode(self):
+        r = F.run_check(F._norm_check([PY, "-c", "import os, sys; sys.exit(os.environ.get('PYTHONDONTWRITEBYTECODE') != '1')"]), self.repo)
+        self.assertTrue(r["passed"], r)
 
 class Draft(unittest.TestCase):
     def test_parse_skips_think_and_fences_and_takes_the_last_mutants_object(self):

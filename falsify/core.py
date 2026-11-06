@@ -127,8 +127,14 @@ def hunks(diff):
     return units
 
 
+BYTECODE = ("__pycache__", "*.pyc", "*.pyo")
+
+
 def copy_tree(repo, dst):
-    shutil.copytree(repo, dst, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    """the working tree into a throwaway dst, minus .git and every bytecode file: a copied .pyc keeps its source's
+    mtime, so a revert landing in the same second with a same-size change (a moved line) would load the FIXED bytecode
+    and an honest check would read 'passes without your change' (found by director-thought-science's M-GOLD, g5.53)."""
+    shutil.copytree(repo, dst, symlinks=True, ignore=shutil.ignore_patterns(".git", *BYTECODE))
 
 
 def revert(dst, patch):
@@ -677,7 +683,8 @@ class Store:
 def run_check(c, tree):
     t0 = time.time()
     try:
-        p = subprocess.run(c["argv"], cwd=os.path.join(tree, c["cwd"]), capture_output=True, timeout=c["timeout_s"])
+        p = subprocess.run(c["argv"], cwd=os.path.join(tree, c["cwd"]), capture_output=True, timeout=c["timeout_s"],
+                           env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})   # -B for any python the check starts
         rc, to, out, err = p.returncode, False, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
         rc, to, out, err = None, True, e.stdout or b"", e.stderr or b""
