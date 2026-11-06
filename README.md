@@ -39,7 +39,15 @@ asks a separate model, the DRAFTER (`falsify/draft.py`, any OpenAI-compatible en
 files, never the check. Each edit is `{path, old, new}` (one exact occurrence). The valid ones are hashed into the record
 with the sha256 of a fresh seed. At judge, with no diff, the seed must hash to its commit, and mutant
 `sha256(seed + record sha) mod K` is drawn. The agent never writes, sees in advance, or picks the mutant it is judged
-against. Without a drafter, `blind` is refused; with a diff, the derived mutant wins and the blind ones are not used.
+against. The default VIEW is `files` (thought-master's ruling 14:49Z 11-06, measured below): a deviation from plasma's
+"never the code", for a reason that holds only in this case. With NO diff, the base files are not the agent's work, so
+they leak nothing about the claim being judged. The check and every result stay hidden, and that hidden part is what
+guards against a mutant tailored to the check. `view=claim` (the claim's words only) stays available.
+Every file the check argv, the sanity argv or a `keep` glob names is withheld from the drafter (a directory token
+withholds everything under it; `.` withholds the whole tree), and the record lists `withheld` and the size-cap `cut`.
+Not withheld: test files the check only DISCOVERS (a bare `pytest -q` names no path), so name the test files in the
+argv. A commit-first dodge (commit the change, register at HEAD, no diff) is judged from this session's earliest
+registered ancestor base, with the derived mutant, before any blind draw. Without a drafter, `blind` is refused; with a diff, the derived mutant wins and the blind ones are not used.
 Measured on the local Qwen3-4B (`demo/run_blind_live.py`, K 5, the fixture with no diff): the honest check PROVED (it
 kills 5 of 5 kept mutants), the weak, mocking check VOID (it kills 1 of 5: only the one in `cart.py`, the code it
 does not mock); 5 of 5 drafts valid per claim, 213 s and about 12k completion tokens per draft.

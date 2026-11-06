@@ -32,11 +32,17 @@ R2 (rule 9): falsify never blocks completion; it records verdicts and NUDGES (fa
 BLIND (step 4, plasma's form): a claim with NO diff (docs, config, "it already works") has no change to revert. At
 register, blind=K asks the store's DRAFTER (a separate model: falsify.draft) for K mutants drafted from the claim's
 words and the base tree's files only, never the check; each is {path, old, new}, an edit of one exact occurrence. The
-valid ones are hashed into the record with sha256 of a fresh seed (commit); the seed waits in seeds/. At judge, with no
+valid ones are hashed into the record with sha256 of a fresh seed (commit); the seed waits in seeds/. Every file the
+check / sanity argv or a KEEP glob names is WITHHELD from the drafter (recorded, with the size-cap cut list). At judge, with no
 diff, the seed is revealed and must hash to the commit, and mutant j = sha256(seed + record sha) mod K is DRAWN: the
 check must pass on the final tree and be killed on the final tree with mutant j applied (same kill quality as a
 revert). A drawn mutant that does not apply is VOID "unrevertable"; one the check passes is VOID "your check passes
 on the drawn blind mutant". The agent never writes, sees in advance, or picks the mutant it is judged against.
+
+COMMIT-FIRST: an agent that commits its change and re-registers at HEAD leaves no diff. With no diff, the judge first
+widens to this store's EARLIEST registered base (same repo) that is a strict ancestor of the record's base, and
+derives the mutant from that change as usual, saying "base includes this session's commits". Only a base with no
+such ancestor (or no change since it) goes blind.
 
 KEEP: pre-registered globs (e.g. "tests/**") whose part of the change is never reverted, so a mutant never "kills"
 the check by deleting the check's own new test (a trivial kill); those hunks are reported, not measured.
@@ -44,7 +50,7 @@ the check by deleting the check's own new test (a trivial kill); those hunks are
 Temp copies exclude `.git` (the check runs on files, not history) and include ignored files (a venv, build outputs),
 so both trees differ ONLY by the change.
 """
-import fcntl, hashlib, json, os, re, secrets, shutil, subprocess, sys, tempfile, time
+import fcntl, fnmatch, hashlib, json, os, re, secrets, shutil, subprocess, sys, tempfile, time
 
 DEFAULT_TIMEOUT_S = 60
 OUT_CAP = 4096
@@ -134,21 +140,47 @@ def revert(dst, patch):
         shutil.rmtree(os.path.join(dst, ".git"), ignore_errors=True)
 
 
-def base_files(top, base, max_file=8000, max_total=60000):
-    """{path: text} of the base commit's tracked text files, each <= max_file chars, <= max_total in all: what a blind
-    drafter reads (the claim's words plus this; never the check)."""
-    out, total = {}, 0
+def named_paths(checks, keep=()):
+    """-> withhold(path) -> bool: True for a repo path the check or sanity argv names (each token read as a path
+    relative to that check's cwd, a pytest node id's file part included; a token naming a directory names everything
+    under it, "." the whole tree) or a KEEP glob matches. What the check runs is never shown to a blind drafter."""
+    names = set()
+    for c in checks:
+        if not c:
+            continue
+        for tok in c["argv"][1:]:
+            if tok.startswith("-") or os.path.isabs(tok):
+                continue
+            n = os.path.normpath(os.path.join(c["cwd"], tok.split("::")[0]))
+            if n.split(os.sep)[0] != "..":
+                names.add(n)
+    def withhold(path):
+        return any(n == "." or path == n or path.startswith(n + "/") for n in names) or any(fnmatch.fnmatch(path, g) for g in keep)
+    return withhold
+
+
+def base_files(top, base, withhold=lambda p: False, max_file=8000, max_total=60000):
+    """-> ({path: text}, withheld, cut): the base commit's tracked text files a blind drafter reads (the claim's words
+    plus this), minus every path withhold() names (the check's own files), each <= max_file chars, <= max_total in all;
+    `cut` lists the text files dropped by those two caps."""
+    out, withheld, cut, total = {}, [], [], 0
     for path in git(top, "ls-tree", "-r", "--name-only", "-z", base).decode().split("\0"):
         if not path:
+            continue
+        if withhold(path):
+            withheld.append(path)
             continue
         try:
             text = git(top, "show", f"{base}:{path}").decode()
         except (Refused, UnicodeDecodeError):
             continue
-        if "\0" in text or len(text) > max_file or total + len(text) > max_total:
+        if "\0" in text:
+            continue
+        if len(text) > max_file or total + len(text) > max_total:
+            cut.append(path)
             continue
         out[path], total = text, total + len(text)
-    return out
+    return out, withheld, cut
 
 
 def _blind_ok(m, files):
@@ -280,7 +312,7 @@ class Store:
                 raise refused("blind", "blind must be an int from 1 to 20 (K mutants to draft)")
             if self.drafter is None:
                 raise Refused("blind: this store has no drafter (falsify.draft.make_drafter; the plugin reads FALSIFY_DRAFT_URL)")
-            files = base_files(top, b)
+            files, withheld, cut = base_files(top, b, named_paths((rec["check"], rec.get("sanity")), rec.get("keep", ())))
             try:
                 drafted = list(self.drafter(claim, files) or [])[:blind]
             except Exception as e:   # a drafter that fails drafts nothing; the claim stays registrable
@@ -291,7 +323,8 @@ class Store:
                     kept.append(m)
             seed = secrets.token_hex(32)
             rec["blind"] = {"asked": blind, "drafted": len(drafted), "mutants": kept, "seed_commit": sha(seed.encode()),
-                            "view": getattr(self.drafter, "view", None), "model": getattr(self.drafter, "model", None)}
+                            "view": getattr(self.drafter, "view", None), "model": getattr(self.drafter, "model", None),
+                            "withheld": withheld, "cut": cut}
             p = os.path.join(self.root, "seeds", rec["blind"]["seed_commit"])
             if not os.path.exists(p):
                 with open(p, "x") as f:
@@ -316,7 +349,20 @@ class Store:
             kept = change(rec["repo"], rec["base_tree"], F) != diff if rec.get("keep") else False
         except Refused as e:
             return self._result(rid, rec["claim"], "void", f"not run: {e}")
+        note = ""
+        if not diff:   # commit-first dodge: widen to this session's earliest registered base that is an ancestor of ours
+            wide = self._earliest_ancestor(rec)
+            if wide:
+                try:
+                    d2 = change(rec["repo"], wide[1]["base_tree"], F, rec.get("keep", ()))
+                except Refused:
+                    d2 = b""
+                if d2:
+                    diff, note = d2, (f"; base includes this session's commits: judged from {wide[1]['base'][:12]} "
+                                      f"(record {wide[0][:12]}), the earliest registered ancestor of {rec['base'][:12]}")
         ev = {"final_tree": F, "diff_sha256": sha(diff), "kept_paths_changed": kept}
+        if note:
+            ev["base_widened_to"] = {"base": wide[1]["base"], "record": wide[0]}
         bl = rec.get("blind")
         if not diff and not (bl and bl["mutants"]):
             return self._result(rid, rec["claim"], "void", "no mutant: the tree has no change since the base"
@@ -328,6 +374,7 @@ class Store:
                 return self._result(rid, rec["claim"], "void", f"not run: the {kind} was not approved", **ev)
         if not diff:
             return self._judge_blind(rid, rec, chk, san, ev)
+        R = lambda verdict, why, **e: self._result(rid, rec["claim"], verdict, why + note, **e)
         units = hunks(diff)
         ev["hunks_total"] = len(units)
         with tempfile.TemporaryDirectory(prefix="falsify-") as tmp:
@@ -337,16 +384,16 @@ class Store:
                 s = run_check(san, fin)
                 ev["final_sanity_run"] = s
                 if not s["passed"]:
-                    return self._result(rid, rec["claim"], "void", "the sanity check fails on your final tree: no reading", **ev)
+                    return R("void", "the sanity check fails on your final tree: no reading", **ev)
             c = run_check(chk, fin)
             ev["final_run"] = c
             if c["timed_out"]:
-                return self._result(rid, rec["claim"], "void", "the check timed out on the final tree: no reading", **ev)
+                return R("void", "the check timed out on the final tree: no reading", **ev)
             if not c["passed"]:
-                return self._result(rid, rec["claim"], "disproved", "the check FAILS on your final tree", **ev)
+                return R("disproved", "the check FAILS on your final tree", **ev)
             r, ev["reverted_run"] = self._mutant(chk, san, rec["repo"], tmp, "reverted", lambda d: revert(d, diff))
             if r != "killed":
-                return self._result(rid, rec["claim"], "void", r, **ev)
+                return R("void", r, **ev)
             cover = []
             for i, (path, patch) in enumerate(units[:max_hunks]):
                 v, run = self._mutant(chk, san, rec["repo"], tmp, f"hunk{i}", lambda d, p=patch: revert(d, p))
@@ -356,7 +403,23 @@ class Store:
         ev.update(hunks_measured=len(cover), hunks_killed=k, hunks_unrevertable=un, hunks=cover)
         more = (f" ({len(units) - len(cover)} beyond the cap not measured)" if len(units) > len(cover) else "") + (
             f"; {un} hunk(s) unrevertable alone" if un else "")
-        return self._result(rid, rec["claim"], "proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
+        return R("proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
+
+    def _earliest_ancestor(self, rec):
+        """-> (record sha, record) of the EARLIEST registration in this store's ledger, same repo, whose base is a strict
+        ancestor of rec's base, or None."""
+        for e in self.ledger()[0]:
+            if e.get("event") != "register":
+                continue
+            r, _ = self.load("records", e["record"])
+            if not r or r["repo"] != rec["repo"] or r["base"] == rec["base"]:
+                continue
+            try:
+                git(rec["repo"], "merge-base", "--is-ancestor", r["base"], rec["base"])
+            except Refused:
+                continue
+            return e["record"], r
+        return None
 
     def _judge_blind(self, rid, rec, chk, san, ev):
         """no diff: reveal the seed, draw ONE pre-registered blind mutant, and judge the check against it."""
@@ -580,7 +643,8 @@ def main(argv):
         elif a.cmd == "judge":
             yes = a.approve or (sys.stdin.isatty() and input(f"run record {a.record[:12]}'s check on your change and its reverts? [y/N] ").strip().lower() == "y")
             h, res = S.judge(a.record, approve=(lambda *_: True) if yes else None, interactive=a.approve or sys.stdin.isatty())
-            print(json.dumps({"result": h, "verdict": res["verdict"], "why": res["why"]}))
+            why = res["why"] + (f"; now run: falsify done {json.dumps(res['claim'])} {h}  to close this claim" if res["verdict"] == "proved" else "")
+            print(json.dumps({"result": h, "verdict": res["verdict"], "why": why}))
             return {"proved": 0, "disproved": 1}.get(res["verdict"], 2)
         elif a.cmd == "done":
             print(S.done(a.claim, a.result))

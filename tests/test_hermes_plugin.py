@@ -140,6 +140,21 @@ class TestHermesPlugin(unittest.TestCase):
         self.assertIn({"type": "array", "items": {"type": "string"}}, chk["anyOf"])
         self.assertIn("e.g.", chk["description"])
 
+    def test_a_proved_judge_ends_on_the_done_call_and_status_lists_it_first(self):
+        other = self.call("falsify_register", {"claim": "Z", "repo": str(self.work), "check": [sys.executable, "-c", "pass"]})["record"]
+        self.human("once")
+        r = self.call("falsify_judge", {"record": self.rid})
+        self.assertEqual(r["verdict"], "proved", r)
+        call = f'now call falsify_done(claim="X is 1", result="{r["result"]}") to close this claim'
+        self.assertEqual(r["next"], call)
+        self.assertTrue(r["why"].endswith(call), r["why"])
+        st = self.call("falsify_status", {})["open"]
+        self.assertEqual([(o["record"], o["verdict"]) for o in st], [(self.rid, "proved"), (other, "unjudged")])
+        self.assertEqual(st[0]["next"], call)
+        self.assertNotIn("next", st[1])
+        stored, _ = P.Store(self.ctx.state.data_dir / "store").load("results", r["result"])
+        self.assertNotIn("falsify_done", stored["why"])   # the stored result is unchanged
+
     def test_register_writes_nothing(self):
         d = tempfile.mkdtemp()
         ctx = FakeCtx(d)

@@ -87,7 +87,11 @@ def make_tools(store, grants):
         grant = grants.take(rid)
         approve = adapter.make_approver(lambda prompt: True) if grant else None
         result_id, res = store.judge(rid, approve=approve, interactive=grant is not None)
-        return _json(dict(res, result=result_id))
+        out = dict(res, result=result_id)
+        if res["verdict"] == "proved":   # the stored result is unchanged (it cannot name its own sha); the reply ends on the call
+            out["next"] = adapter.next_call(res["claim"], result_id)
+            out["why"] = f"{res['why']}; {out['next']}"
+        return _json(out)
 
     def done(args, **_):
         try:
@@ -96,7 +100,8 @@ def make_tools(store, grants):
             return _json({"error": str(e)})
 
     def status(args, **_):
-        return _json({"open": [{"record": r, "claim": c, "verdict": v, "why": w} for r, c, v, w in store.open_claims()],
+        return _json({"open": [dict({"record": r, "claim": c, "verdict": v, "why": w}, **({"result": h, "next": adapter.next_call(c, h)}
+                                    if v == "proved" else {})) for r, c, v, w, h in adapter.open_rows(store)],
                       "audit": [{"line": ln, "reason": why} for ln, why in store.audit()]})
 
     argv = {"description": "The command that must pass: " + CHECK_SHAPE, "anyOf": [
@@ -131,7 +136,8 @@ def make_tools(store, grants):
             "Mark a claim DONE on a proved result (refused otherwise).",
             {"claim": {"type": "string"}, "result": {"type": "string"}}, ["claim", "result"]), done),
         ("falsify_status", schema("falsify_status",
-            "List open claims (not done on a proved result) and any done line whose evidence no longer resolves.",
+            "List open claims (not done on a proved result; PROVED ones first, each with the falsify_done call that closes "
+            "it) and any done line whose evidence no longer resolves.",
             {}, []), status),
     ]
 

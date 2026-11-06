@@ -2,9 +2,25 @@
 the agent's finish; it answers the host's public pre_verify hook with a NUDGE naming every claim that is not done on a
 proved result and every changed path no open claim covers, and otherwise lets the turn finish. Approval (R1) is the host's to supply: make_approver adapts any
 yes/no callable, and nothing here runs a check by itself."""
+import json
 import os
 
 from . import core as F  # noqa: F401
+
+
+def next_call(claim, result_id):
+    """the exact call that closes a proved claim; falsify never makes it for the agent (done is the agent's act)."""
+    return f"now call falsify_done(claim={json.dumps(claim)}, result=\"{result_id}\") to close this claim"
+
+
+def open_rows(store):
+    """open claims, PROVED first (a proved claim is one call from done): [(record, claim, verdict, why, latest result
+    sha or None)]."""
+    rows = []
+    for rid, c, v, why in store.open_claims():
+        rs = store.results_for(rid) if c is not None else []
+        rows.append((rid, c, v, why, rs[-1][0] if rs else None))
+    return sorted(rows, key=lambda r: r[2] != "proved")
 
 
 def uncovered(store, changed_paths, cwd=None):
@@ -33,9 +49,10 @@ def nudge_message(store, limit=5, changed_paths=(), cwd=None):
         more = f" and {len(bare) - limit} more" if len(bare) > limit else ""
         parts.append(f"falsify: you changed {', '.join(bare[:limit])}{more} with no falsify claim: register a check "
                      f"that fails without your change.")
-    rows = store.open_claims()
+    rows = open_rows(store)
     if rows:
-        lines = [f"- {(c or '(unreadable record)')[:120]} [{rid[:12]}]: {v} ({why})" for rid, c, v, why in rows[:limit]]
+        lines = [f"- {(c or '(unreadable record)')[:120]} [{rid[:12]}]: {v} ({why})" + (f": {next_call(c, res)}" if v == "proved" else "")
+                 for rid, c, v, why, res in rows[:limit]]
         more = f"\n... and {len(rows) - limit} more" if len(rows) > limit else ""
         parts.append(f"falsify: {len(rows)} claim(s) are not done on a proved result. Each needs its pre-registered check "
                      f"to pass while its mutant fails; VOID means the check could not have failed or was not run.\n"

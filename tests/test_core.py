@@ -374,6 +374,23 @@ class Adapter(Base):
         self.S.done("add works", self.judge(rid)[0])
         self.assertIn("you changed " + inside + " with no falsify claim", A.nudge_message(self.S, changed_paths=[inside]))
 
+    def test_a_proved_not_done_claim_is_nudged_with_its_exact_done_call_and_listed_first(self):
+        open_rid = self.reg("test_taut.py", claim="taut")   # unjudged, registered first
+        rid = self.reg()
+        self.write("subject.py", FIXED)
+        h, _ = self.judge(rid)
+        rows = A.open_rows(self.S)
+        self.assertEqual([(r[0], r[2], r[4]) for r in rows], [(rid, "proved", h), (open_rid, "unjudged", None)])
+        msg = A.nudge_message(self.S)
+        call = 'now call falsify_done(claim="add works", result="%s") to close this claim' % h
+        self.assertEqual(A.next_call("add works", h), call)
+        self.assertIn(call, msg)
+        self.assertLess(msg.index("add works"), msg.index("taut"))
+        self.assertEqual(msg.count("falsify_done("), 1)   # only the proved claim gets the call
+        self.assertIn(rid, [r[0] for r in self.S.open_claims()])   # proved is NOT done: nothing auto-closed
+        self.S.done("add works", h)
+        self.assertNotIn("falsify_done(", A.nudge_message(self.S))
+
     def test_a_void_claim_is_named_in_the_nudge(self):
         self.S.judge(self.reg())
         self.assertIn("void (not run: no approver)", A.nudge_message(self.S))
@@ -423,6 +440,25 @@ class Blind(Base):
         self.assertEqual(files["subject.py"], FIXED)
         self.assertNotIn(PY, json.dumps(files))
 
+    def test_the_drafter_never_sees_the_files_the_check_sanity_or_keep_name(self):
+        os.makedirs(os.path.join(self.repo, "tests"))
+        self.write("tests/test_more.py", TEST_ADD)
+        self.write("helper.py", "X = 1\n")
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "more")
+        rid = self.S.register("add works", self.repo, [PY, "test_add.py::test_x"], sanity=[PY, "helper.py"], keep=["tests/**"], blind=2)
+        ((_, files),) = self.seen
+        self.assertEqual(sorted(files), ["subject.py", "test_taut.py"])
+        self.assertEqual(self.S.load("records", rid)[0]["blind"]["withheld"], ["helper.py", "test_add.py", "tests/test_more.py"])
+        self.S.register("all", self.repo, [PY, "-m", "pytest", "."], blind=2)
+        self.assertEqual(self.seen[-1][1], {})   # "." names the whole tree: nothing is shown
+
+    def test_the_size_cap_cut_list_is_recorded(self):
+        files, withheld, cut = F.base_files(self.repo, "HEAD", max_total=len(FIXED) + 1)
+        self.assertEqual((sorted(files), withheld), (["subject.py"], []))
+        self.assertEqual(cut, ["test_add.py", "test_taut.py"])
+        self.assertEqual(self.S.load("records", self.reg(blind=2))[0]["blind"]["cut"], [])
+
     def test_a_moved_seed_voids_the_draw(self):
         rid = self.reg(blind=2)
         bl = self.S.load("records", rid)[0]["blind"]
@@ -457,6 +493,34 @@ class Blind(Base):
         self.assertIn("occurs 0 times", F.apply_blind(d, SUB))
         self.assertIn("not a file", F.apply_blind(d, {"path": "../x", "old": "a", "new": "b"}))
 
+
+
+class CommitFirst(Base):
+    """leak 2: an agent that commits its change and then registers at HEAD has no diff; the judge widens to this
+    session's earliest registered base that is an ancestor, and derives the mutant from that."""
+    def commit(self, msg):
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qam", msg)
+
+    def test_a_commit_first_dodge_is_judged_from_the_earlier_base(self):
+        first = self.reg()                      # registered at the BUGGY base
+        self.write("subject.py", FIXED)
+        self.commit("the fix, committed before re-registering")
+        dodge = self.reg(claim="add works")     # base HEAD = the fix: no diff
+        h, r = self.judge(dodge)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+        self.assertIn("base includes this session's commits", r["why"])
+        self.assertEqual(r["evidence"]["base_widened_to"]["record"], first)
+        _, r = self.judge(self.reg("test_taut.py", claim="taut"))
+        self.assertEqual(r["verdict"], "void")
+        self.assertTrue(r["why"].startswith("your check passes without your change; base includes"), r["why"])
+
+    def test_with_no_earlier_ancestor_there_is_still_no_mutant(self):
+        self.write("subject.py", FIXED)
+        self.commit("fix")
+        _, r = self.judge(self.reg())
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("no mutant", r["why"])
+        self.assertNotIn("base_widened_to", r["evidence"])
 
 class Draft(unittest.TestCase):
     def test_parse_skips_think_and_fences_and_takes_the_last_mutants_object(self):
