@@ -40,6 +40,9 @@ files, never the check. Each edit is `{path, old, new}` (one exact occurrence). 
 with the sha256 of a fresh seed. At judge, with no diff, the seed must hash to its commit, and mutant
 `sha256(seed + record sha) mod K` is drawn. The agent never writes, sees in advance, or picks the mutant it is judged
 against. Without a drafter, `blind` is refused; with a diff, the derived mutant wins and the blind ones are not used.
+Measured on the local Qwen3-4B (`demo/run_blind_live.py`, K 5, the fixture with no diff): the honest check PROVED (it
+kills 5 of 5 kept mutants), the weak, mocking check VOID (it kills 1 of 5: only the one in `cart.py`, the code it
+does not mock); 5 of 5 drafts valid per claim, 213 s and about 12k completion tokens per draft.
 Not proved: that the drafter's mutants are the ones that matter. A weak drafter makes a weak judge, and the record
 keeps `asked` / `drafted` / kept so that is visible.
 
