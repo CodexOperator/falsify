@@ -1,6 +1,6 @@
 # Hermes hook map for the "falsify" plugin
 
-Source: `/fast/director-thought-science/hermes-agent` @ `ca4360692055bdb4df3a695c164646e528891da8` (read-only). All cites are `path:line` at that sha.
+Source: hermes-agent @ `ca4360692055bdb4df3a695c164646e528891da8`. All cites are `path:line` at that sha.
 
 ## 1. Hook map
 
@@ -49,7 +49,7 @@ Dispatcher: `invoke_hook(name, **kw)` → `hermes_cli/plugins.py:1800`, body `he
   - No context and no human: plugin rules fail closed (`fail_closed_when_no_human=True`, `approval.py:1231`, `:1103-1109`).
 - **Config defaults** (`hermes_cli/config_defaults.py:1650-1676`): `approvals.mode: smart`, `timeout: 300`, `cron_mode: deny`, `single_query_mode: deny`, `unattended_mode: deny`, `deny: []` (never-bypassable globs, `approval.py:1144-1153`).
 - **Messaging gateway** (Telegram, Discord, …) counts as a human surface (`is_gateway`). The approval goes out as a card or `/approve` with a timeout; silence = deny (`approval.py:964-966`).
-- **Falsify consequence:** the judge must refuse by itself under cron / gateway / non-interactive. Do not rely on `approvals.*_mode`, because the user can set it to approve. Rule 12 forbids routing around approvals and requires a clean fail or timeout under unattended runs (`plugin-catalog/README.md:108-113`).
+- **Falsify consequence:** the judge must refuse by itself under cron, single-query and the unattended platforms (an attended messaging gateway asks a person). Do not rely on `approvals.*_mode`, because the user can set it to approve. Rule 12 forbids routing around approvals and requires a clean fail or timeout under unattended runs (`plugin-catalog/README.md:108-113`).
 - `ctx.dispatch_tool("terminal", ...)` (`plugins.py:678-687`) goes to `registry.dispatch` (`tools/registry.py:972`). I did not verify whether that path fires `pre_tool_call`. The terminal handler's own guard (`tools/terminal_tool.py:141`, `check_all_command_guards` at `approval.py:1238`) prompts only for DANGEROUS patterns: a plain `pytest` argv would run unprompted.
 
 ## 3. Registration

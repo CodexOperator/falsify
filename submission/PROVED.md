@@ -1,36 +1,36 @@
-<!-- DRAFT, private (thought-master 16:00Z 11-06, package item 6). Drafted by director-thought-1; director-thought-review
-     audits each line against the bytes. "main" = /fast/falsify main 8872228 (later commits touch submission/ only). A test cited by name lives in
-     tests/ there and passed on a fresh clone. A transcript path is a recorded run on /fast, NOT in git. -->
 # falsify: what is proved, what is not
 
-## Proved (each line names the run that shows it)
+Each claim below cites either a test in this repository (`tests/`, `demo/`), which you can run, or says that it
+comes from a recorded run not included in this repository.
 
-| claim | run |
+## Proved
+
+| claim | evidence |
 |---|---|
-| A check that passes without the change reads VOID; an honest check on the same fix reads PROVED, covering 2 of 2 hunks | demo/test_demo.py (the pinned demo story; "demo story OK" on a fresh clone of main) |
-| A planted tautological check reads VOID | test_PLANTED_tautology_reads_void |
-| A proved claim reports how many hunks its check covers | test_a_check_that_needs_the_change_is_proved_with_its_hunk_coverage, test_a_check_that_misses_a_hunk_says_k_of_h |
-| A check run with no human approval, a "no", or a non-interactive caller executes nothing and reads VOID "not run" | test_no_approver_runs_nothing, test_non_interactive_runs_nothing_even_if_approved, test_auto_approved_run_without_a_human_answer_is_void_not_run, test_a_human_deny_runs_nothing |
-| The approver sees exactly the registered argv; one human "once" grants one run | test_the_approver_sees_exactly_the_records_argv_once, test_human_once_proves_and_the_grant_is_one_shot |
-| An edited record, or an edited ledger line, is detected | test_a_moved_record_reads_void, test_an_edited_or_dropped_ledger_line_breaks_the_chain_and_audit_says_so |
-| Retry-until-green is counted and flagged | test_retry_until_green_is_counted_and_flagged |
-| A collection error or an import break is never counted as a kill | test_an_rc_outside_kill_rc_is_unrevertable_not_a_kill, test_a_hunk_that_breaks_the_import_is_unrevertable_by_sanity_not_a_kill |
-| The nudge names files changed with no claim, and proved claims not yet closed (with the exact closing call) | test_a_change_no_open_claim_covers_is_nudged, test_a_proved_not_done_claim_is_nudged_with_its_exact_done_call_and_listed_first |
-| No-diff claims: one blind mutant, drafted without the check, drawn after the run by a committed seed | test_a_no_diff_claim_is_proved_against_its_drawn_blind_mutant, test_a_tautological_check_reads_void_on_the_drawn_mutant, test_a_moved_seed_voids_the_draw |
-| The blind drafter never gets the check's own files or the tests a runner would discover | test_the_drafter_never_sees_the_files_the_check_sanity_or_keep_name, test_a_pathless_pytest_check_withholds_pytests_discovery_set |
-| Committing first does not dodge the derived mutant (within one session) | test_a_commit_first_dodge_is_judged_from_the_earlier_base, test_widening_never_crosses_into_an_older_session |
-| Stale bytecode cannot fake a pass on a reverted tree (the bug the suite's positive control found) | test_a_same_size_moved_line_fix_with_an_honest_check_reads_proved; goal:g5.53 M-GOLD a08 (director-thought-science) |
-| Under Hermes, the drafter's URL and key come only through Hermes's secret scope | test_the_drafter_key_comes_from_hermes_secret_scope_never_os_environ |
-| The plugin passes Hermes's own checks | `hermes plugins validate`: "Validation passed." (15 checks, on a fresh clone of main 8872228); catalog validator OK on a fill.py-rendered copy |
-| Hermes + Haiku, UNHINTED task (the prompt names no falsify call): the agent registered a claim on its own; Hermes's approval prompt showed the exact check; the run's one approval was answered "Allow once" by a scripted stand-in for the user (drive_session.py, not a human); the verdict was proved, covering 1 of 1 hunks; the agent left it open, not done | /fast/director-thought-goals/session/transcript10.txt (:75 prompt, :326-333 approval prompt, :412 "The claim is registered and judged proved. It is recorded as open, not marked done.", :431 verdict); drive10.out "approvals [(31.5, 'o')]" |
-| Hermes + local Qwen3-4B, SCRIPTED task (the prompt gave the exact falsify_register arguments, the check and each call in order): register, judge, proved | /fast/director-thought-goals/session/transcript8.txt (:75-79 = task-hinted.md) |
-| goal:g5.52, 20 tasks (SOLVED = falsify PROVED on the agent's own check AND a hidden test passes): Haiku 5.5 20/20 for $0.0198 ($0.00099 per solve), Sonnet 5.5 batch 20/20 $0.0701, Sonnet 5.5 20/20 $0.2656, Opus 5.5 20/20 $0.6762, local Qwen3-4B 6/20 at $0 | agi graph posts/thought-master c0fd488d54, experiment:solved-claims-per-dollar-local-and-console-g5-52-run-1; hypothesis:solved-claims-per-dollar-local-and-console-g5-52 (proved) |
-| On that suite, two planted ways to game it failed on all 20 tasks: an agent that edits nothing solved 0/20; one that only adds a passing test read VOID on 20/20. The reference fix (the positive control) read SOLVED 20/20 | same experiment node (M-SOLVE, M-HIDE, M-GOLD) |
-| Prompt caching cut Sonnet's bill to 0.636 of the same usage priced flat | same experiment node (E-CACHE) |
-| goal:g5.53, a harder suite of 40 tasks in three tiers (A multi-file, B algorithmic, C specification), 3 runs each: Opus 5.5 does NOT separate from Haiku 5.5 (per-task Opus minus Haiku rate -0.033, 95% cluster bootstrap [-0.092, 0.042]); solved of 120: Sonnet loop 120, unreal-agent 120, pi 119, Haiku loop 116, droid 113, Opus loop 112, Sonnet batch one-shot 106; local Qwen3-4B 0 of 40 | experiment:opus-does-not-separate-from-haiku-on-a-tiered-suite-g5-53-run-1, agi graph posts/thought-master 575cd46c41; hypothesis:opus-does-not-separate-from-haiku-on-a-tiered-suite-g5-53 (disproved, as pre-registered) |
-| On g5.53, the lowest USD per solve was pi on Haiku 5.5 ($0.002275 vs the bare Haiku loop's $0.002291), and it beat the loop under the pre-registered non-inferiority rule, against all three committed predictions. unreal-agent solved 120/120 at 1.55x the loop's cost per solve; droid 3.77x | same node (E-FRONT); goal:g5.53 v3 THOUGHT |
-| falsify's own error rate, measured on g5.53 against a hidden test: false assurance (falsify PROVED, the hidden test failed) Haiku loop 4 of 120 (3 in tier A, all on one task, a11, a currency-rounding edge; 1 in tier B), pi 1, droid 3, local Qwen3-4B 3 of 40, the Sonnet loop, unreal-agent, Opus loop and Sonnet batch 0; false alarm (the hidden test passed, falsify read VOID or disproved) Sonnet batch one-shot 14 of 120 (11 in tier C), Opus loop 8 (all 8 of Opus's misses), droid 1, local Qwen3-4B 1, every other arm 0 | same node (honesty per tier) |
-| The suite's controls held on g5.53 too: an agent that edits nothing 0/40, one that only adds a passing test VOID 40/40, the reference fix SOLVED 40/40 | same node (M-SOLVE, M-HIDE, M-GOLD) |
+| A check that passes without the change reads VOID; an honest check on the same fix reads PROVED, covering 2 of 2 hunks | `demo/test_demo.py` (the demo story) |
+| A planted tautological check reads VOID | `test_PLANTED_tautology_reads_void` |
+| A proved claim reports how many hunks its check covers | `test_a_check_that_needs_the_change_is_proved_with_its_hunk_coverage`, `test_a_check_that_misses_a_hunk_says_k_of_h` |
+| A check with no approval, a "no", or a non-interactive caller executes nothing and reads VOID "not run" | `test_no_approver_runs_nothing`, `test_non_interactive_runs_nothing_even_if_approved`, `test_auto_approved_run_without_a_human_answer_is_void_not_run`, `test_a_human_deny_runs_nothing` |
+| The approver sees exactly the registered argv; one "Allow once" grants one run | `test_the_approver_sees_exactly_the_records_argv_once`, `test_human_once_proves_and_the_grant_is_one_shot` |
+| An edited record, or an edited ledger line, is detected | `test_a_moved_record_reads_void`, `test_an_edited_or_dropped_ledger_line_breaks_the_chain_and_audit_says_so` |
+| Retry-until-green is counted and flagged | `test_retry_until_green_is_counted_and_flagged` |
+| A collection error or an import break is never counted as a kill | `test_an_rc_outside_kill_rc_is_unrevertable_not_a_kill`, `test_a_hunk_that_breaks_the_import_is_unrevertable_by_sanity_not_a_kill` |
+| The nudge names files changed with no claim, and proved claims not yet closed (with the exact closing call) | `test_a_change_no_open_claim_covers_is_nudged`, `test_a_proved_not_done_claim_is_nudged_with_its_exact_done_call_and_listed_first` |
+| No-diff claims: one blind mutant, drafted without seeing the check, drawn after the run by a committed seed | `test_a_no_diff_claim_is_proved_against_its_drawn_blind_mutant`, `test_a_tautological_check_reads_void_on_the_drawn_mutant`, `test_a_moved_seed_voids_the_draw` |
+| The blind drafter never gets the check's own files or the tests a runner would discover | `test_the_drafter_never_sees_the_files_the_check_sanity_or_keep_name`, `test_a_pathless_pytest_check_withholds_pytests_discovery_set` |
+| Committing first does not dodge the derived mutant (within one session) | `test_a_commit_first_dodge_is_judged_from_the_earlier_base`, `test_widening_never_crosses_into_an_older_session` |
+| Stale bytecode cannot fake a pass on a reverted tree (a bug a positive-control run found) | `test_a_same_size_moved_line_fix_with_an_honest_check_reads_proved` |
+| Under Hermes, the drafter's URL and key come only through Hermes's secret scope | `test_the_drafter_key_comes_from_hermes_secret_scope_never_os_environ` |
+| The plugin passes Hermes's own plugin checks | `hermes plugins validate`: "Validation passed." |
+| Hermes + claude-haiku-5-5, a task that names no falsify tool: the agent registered a claim on its own; Hermes's approval prompt showed the exact check; the one approval was answered "Allow once" by a scripted stand-in for the user, not a person; the verdict was proved, covering 1 of 1 hunks; the agent left the claim open, not done | from a recorded run not included in this repository |
+| Hermes + local Qwen3-4B, a task that spelled out each falsify call and its arguments: register, judge, proved | from a recorded run not included in this repository |
+| A 20-task study (SOLVED = falsify PROVED on the agent's own check AND a hidden test passes): claude-haiku-5-5 20/20 for $0.0198 ($0.00099 per solve), claude-sonnet-5-5 batch 20/20 $0.0701, claude-sonnet-5-5 20/20 $0.2656, claude-opus-5-5 20/20 $0.6762, local Qwen3-4B 6/20 at $0 | from a recorded run not included in this repository |
+| On that study, two planted ways to game it failed on all 20 tasks: an agent that edits nothing solved 0/20; one that only adds a passing test read VOID on 20/20. The reference fix (the positive control) read SOLVED 20/20 | from a recorded run not included in this repository |
+| Prompt caching cut Sonnet's bill to 0.636 of the same usage priced without caching | from a recorded run not included in this repository |
+| A harder study, 40 tasks in three tiers (A multi-file, B algorithmic, C specification), 3 runs each: Opus 5.5 does NOT separate from Haiku 5.5 (per-task Opus minus Haiku rate -0.033, 95% cluster bootstrap [-0.092, 0.042]); solved of 120: Sonnet loop 120, unreal-agent 120, pi 119, Haiku loop 116, droid 113, Opus loop 112, Sonnet batch one-shot 106; local Qwen3-4B 0 of 40 | from a recorded run not included in this repository |
+| On the harder study, the lowest USD per solve was pi on claude-haiku-5-5 ($0.002275 vs the bare Haiku loop's $0.002291), and it beat the loop under a pre-registered non-inferiority rule, against all three predictions committed before the run. unreal-agent solved 120/120 at 1.55x the loop's cost per solve; droid 3.77x | from a recorded run not included in this repository |
+| falsify's own error rate on the harder study, measured against a hidden test: false assurance (falsify PROVED, the hidden test failed) Haiku loop 4 of 120 (3 in tier A, all on one currency-rounding task; 1 in tier B), pi 1, droid 3, local Qwen3-4B 3 of 40, the Sonnet loop, unreal-agent, Opus loop and Sonnet batch 0; false alarm (the hidden test passed, falsify read VOID or disproved) Sonnet batch one-shot 14 of 120 (11 in tier C), Opus loop 8 (all 8 of Opus's misses), droid 1, local Qwen3-4B 1, every other arm 0 | from a recorded run not included in this repository |
+| The controls held on the harder study too: an agent that edits nothing 0/40, one that only adds a passing test VOID 40/40, the reference fix SOLVED 40/40 | from a recorded run not included in this repository |
 
 ## Not proved, and the limits
 
@@ -38,37 +38,36 @@
   edits, at most `max_verify_nudges` times per turn (default 3). Edits made through the terminal never trigger it.
 - **No sandbox.** An approved check runs with the user's permissions in a temporary copy.
 - **Approval is an answer at Hermes's prompt, not proof of a person.** falsify cannot tell a person from a script answering
-  it; in session 10 a scripted stand-in answered.
+  it; in the recorded Haiku run a scripted stand-in answered.
 - **A proved claim means this check needs this change**, not that the code is correct or the check tests the right
   property. A blind mutant is only as good as its drafter.
-- **Closing the claim:** in session 10 the agent did not call `falsify_done`. The closing-call hint (G3) is on main and
-  tested, but no Hermes run with it has been recorded yet.
-- **Unprompted use by the local 4B model is not shown.** Session 11 (local, unhinted): 0 falsify tool calls in 14 min 58 s
-  (Hermes's own Duration line; 900 s budget), and a dangerous-command approval timed out unanswered (:5696, :5701), per
-  /fast/director-thought-goals/session/transcript11.txt. The nudge's text is not printed (Hermes stores it as a synthetic
-  user turn), but its trace is: after the landed patch (:1572) the model replies "the user is pointing out that I didn't
-  use the falsify tools" (:5737), and Hermes counts 2 user messages (:6490-6491) where the task is the only visible one.
-- **Hermes 3 is not agentic.** Hermes Agent's own banner warns "Nous Research Hermes 3 & 4 models are NOT agentic". In our
-  three Hermes-3-8B sessions (transcript1-3.raw) it made 1 tool call, and that one failed on our harness's missing
-  directory (exit 126), not on the model. So the demo runs Qwen3-4B (local) and claude-haiku-5-5.
+- **Closing the claim:** in the recorded Haiku run the agent did not call `falsify_done`. The closing-call hint is in
+  this repository and tested, but no Hermes run with it has been recorded yet.
+- **Unprompted use by the local 4B model is not shown.** In a recorded run with a task that names no falsify tool, the
+  local Qwen3-4B made 0 falsify tool calls in 14 min 58 s, and a dangerous-command approval timed out unanswered. The
+  nudge's text is not printed (Hermes stores it as a synthetic user turn), but its trace is: after its patch landed the
+  model replied "the user is pointing out that I didn't use the falsify tools", and Hermes counted 2 user messages
+  where the task is the only visible one.
+- **Hermes 3 is not agentic.** Hermes Agent's own banner warns "Nous Research Hermes 3 & 4 models are NOT agentic". In
+  three recorded Hermes-3-8B runs it made 1 tool call, and that one failed on the recording harness's missing directory
+  (exit 126), not on the model. So the demo runs Qwen3-4B (local) and claude-haiku-5-5.
 - **Discovery:** tests a custom runner finds under other names are not withheld from the blind drafter.
-- **g5.52's scope.** Its Console arms ran through a minimal SCRIPTED loop, not an agent harness (the owner has since
-  ruled the Console door harness-only), and every Console arm solved 20/20. So its dollar figures are a price list
-  for this easy suite, not a quality ranking of the models. The harness lane (pi, droid, unreal-agent, run 3, jailed)
-  solved 20/20 each with 0 false assurance, 0 false alarm, 0 tamper, and each cost more than the bare loop on
-  claude-haiku-5-5: pi 1.4.0 1.35x, unreal-agent a5f3fd1 1.80x, droid 0.247.0 5.2-5.3x, mostly from extra turns. No task
-  discriminated, so this says nothing about solve rate. Source: experiment:harness-overhead-g5-52-suite-run-3, agi
-  graph posts/thought-master 23642c1f50.
-- **g5.53's scope.** Its Console arms (Haiku, Sonnet, Opus loops and the Sonnet batch) ran through a minimal SCRIPTED
-  loop, not a harness; the three harnesses ran jailed through the door. Opus's 8 misses are falsify false alarms (the
+- **The 20-task study's scope.** Its Claude arms ran through a minimal scripted loop, not an agent harness, and every
+  Claude arm solved 20/20. So its dollar figures are a price list for this easy suite, not a quality ranking of the
+  models. Three coding-agent harnesses (pi, droid, unreal-agent, each in an isolated jail) solved 20/20 each with 0 false
+  assurance, 0 false alarm, 0 tampering, and each cost more than the bare loop on claude-haiku-5-5: pi 1.4.0 1.35x,
+  unreal-agent a5f3fd1 1.80x, droid 0.247.0 5.2-5.3x, mostly from extra turns. No task discriminated, so this says
+  nothing about solve rate.
+- **The harder study's scope.** Its Claude arms (Haiku, Sonnet, Opus loops and the Sonnet batch) ran through a minimal
+  scripted loop, not a harness; the three harnesses ran in isolated jails. Opus's 8 misses are falsify false alarms (the
   hidden test passed), not wrong fixes, so the suite did not separate the models. pi's win over the bare loop is 0.7%
-  of USD per solve and FRAGILE: pi's dollars come from its own event log, the loop's are door-reconciled (different
-  books).
-- **What g5.53 shows about falsify itself.** False alarms concentrate where the agent writes its check BLIND: the Sonnet
-  batch arm writes patch and check in one shot without running either, and 11 of its 14 false alarms are in the
-  specification tier, where its own check fails on its own (correct) final tree. falsify judges the agent's own check;
-  a check that is wrong on a correct fix reads disproved, and the derived mutant cannot rescue it. In the specification
-  tier, the derived mutant is the unimplemented stub, so PROVED is near-automatic there and a hidden test carries the
-  verdict; that is where false assurance could hide. On g5.53 none of the Haiku loop's, pi's or droid's false
-  assurances were in that tier (the loop's 4: 3 in A on a11, 1 in B; pi's 1 and droid's 3 all on a11); the local
-  Qwen3-4B's 3 are not split by tier in the committed node.
+  of USD per solve and fragile: pi's dollars come from its own event log, the loop's are reconciled against API
+  billing (different books).
+- **What the harder study shows about falsify itself.** False alarms concentrate where the agent writes its check
+  BLIND: the Sonnet batch arm writes patch and check in one shot without running either, and 11 of its 14 false alarms
+  are in the specification tier, where its own check fails on its own (correct) final tree. falsify judges the agent's
+  own check; a check that is wrong on a correct fix reads disproved, and the derived mutant cannot rescue it. In the
+  specification tier, the derived mutant is the unimplemented stub, so PROVED is near-automatic there and a hidden test
+  carries the verdict; that is where false assurance could hide. None of the Haiku loop's, pi's or droid's false
+  assurances were in that tier (the loop's 4: 3 in A, 1 in B; pi's 1 and droid's 3 all on the one tier-A task); the
+  local Qwen3-4B's 3 are not split by tier in the recorded results.

@@ -1,22 +1,23 @@
-"""falsify step 4, live: a NO-diff claim on the demo fixture, K blind mutants drafted by the local model, judged with the
-honest and the weak check. Also measures every kept mutant against both checks (the draw judges one; the table says
-how the draw could have gone). Usage: python demo/run_blind_live.py <out.json> [K]  (the drafter comes from FALSIFY_DRAFT_* (falsify.draft.from_env),
-default the local llama.cpp server http://127.0.0.1:8091/v1 in view "files"; and pytest in FALSIFY_DEMO_PYTHON or this interpreter).
-Measured 14:34Z 11-06, Qwen3-4B Q4_K_M, K 5: honest PROVED (drawn 0, kills 5 of 5), weak VOID (drawn 2, kills 1 of 5);
-5 of 5 drafts valid per claim, 213 s and 12018 completion tokens per draft, 0 USD."""
+"""falsify, live blind mutants: a NO-diff claim on the demo fixture, K blind mutants drafted by a model you point it
+at, judged with the honest and the weak check. Also measures every kept mutant against both checks (the draw judges
+one; the table says how the draw could have gone).
+Usage: FALSIFY_DRAFT_URL=<OpenAI-compatible base, e.g. a local llama.cpp server http://localhost:8080/v1> \
+       FALSIFY_DRAFT_MODEL=<model> python demo/run_blind_live.py <out.json> [K]
+(FALSIFY_DRAFT_API=anthropic for a Messages API base; pytest in FALSIFY_DEMO_PYTHON or this interpreter)."""
 import json, os, shutil, subprocess, sys, tempfile, time
 fpkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 out, K = sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 5
 sys.path.insert(0, fpkg)
 from falsify import core as F, draft as D
 PY = os.environ.get("FALSIFY_DEMO_PYTHON", sys.executable)
-tmp = tempfile.mkdtemp(prefix="s4-")
+tmp = tempfile.mkdtemp(prefix="falsify-blind-")
 repo = os.path.join(tmp, "shop")
 shutil.copytree(os.path.join(fpkg, "demo", "fixture"), repo, ignore=shutil.ignore_patterns("BUG.md", "__pycache__"))
 g = lambda *a: subprocess.run(["git", "-C", repo, *a], check=True, capture_output=True)
 g("init", "-q"); g("add", "-A"); g("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "base")
-env = {"FALSIFY_DRAFT_URL": "http://127.0.0.1:8091/v1", "FALSIFY_DRAFT_MODEL": "qwen3-4b", **os.environ, "FALSIFY_DRAFT_K": str(K)}
-dr = D.from_env(env)
+dr = D.from_env({**os.environ, "FALSIFY_DRAFT_K": str(K)})
+if dr is None:
+    raise SystemExit("set FALSIFY_DRAFT_URL (and FALSIFY_DRAFT_MODEL) to a drafter endpoint")
 S = F.Store(os.path.join(tmp, "store"), drafter=dr)
 claim = "checkout applies a pct% discount to the cart total, and the total is never negative"
 chk = lambda t: [PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", t]

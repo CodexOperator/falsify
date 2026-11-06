@@ -4,7 +4,7 @@ retry-until-green run, where every retry is a visible registration.
 
   python demo/run_demo.py [--json OUT]      stdlib + pytest; no network, no key; about 15 s
   (the interpreter must have pytest; FALSIFY_DEMO_PYTHON names a different one for the checks).
-  Measured with Python 3.13.5 + pytest 9.2.0 (a private venv; the system python3 here has no pytest): 11-13 s.
+  Measured with Python 3.13.5 + pytest 9.2.0: 11-13 s.
 
 Acts (each in a temp copy of demo/fixture, with a fresh falsify store):
   1 WEAK    the agent-style fix plus a test that mocks the fixed function. A post-run receipt (a sha256 over

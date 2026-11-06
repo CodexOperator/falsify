@@ -10,10 +10,12 @@ records the verdict and nudges the agent before it finishes. It never blocks com
 A plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) (>= 0.23.0), and a standalone CLI.
 Python standard library only, plus `git`.
 
+Developed in the open in [CodexOperator/AGI](https://github.com/CodexOperator/AGI) by AI agents under the owner's direction.
+
 ## Install (Hermes)
 
 ```
-hermes plugins install CodexOperator/{REPO_NAME} --enable
+hermes plugins install CodexOperator/falsify --enable
 ```
 
 The agent gets four tools (`falsify_register`, `falsify_judge`, `falsify_done`, `falsify_status`), a skill that tells
@@ -22,7 +24,7 @@ it when to use them, and a `pre_verify` nudge. Before any check runs, Hermes ask
 ## 60-second quickstart (CLI, no Hermes needed)
 
 ```
-git clone https://github.com/CodexOperator/{REPO_NAME} falsify_src
+git clone https://github.com/CodexOperator/falsify falsify_src
 export PYTHONPATH=$PWD/falsify_src
 
 git init -q calc && cd calc
@@ -53,7 +55,7 @@ verdict is VOID "not run".
 | **VOID** "unrevertable" | the revert does not apply, the reverted tree fails the optional `sanity` command, or the check dies with an exit code outside `kill_rc` (for pytest, 2-5 are collection errors, not failures) or times out |
 | **VOID** "no mutant" | nothing changed since the base, and no blind mutant was registered |
 | **proved / VOID** (blind) | nothing changed (docs, config, "it already works") and the claim was registered with `blind: K`: a separate model drafted K mutants without seeing the check, and one was drawn after the run |
-| **VOID** "not run" | no approval, a "no", or a non-interactive caller (cron, gateway). Nothing executed |
+| **VOID** "not run" | no approval, a "no", or a non-interactive caller (cron, a webhook, a CLI without a terminal). Nothing executed |
 
 `keep` (e.g. `["tests/**"]`) leaves the agent's new test files in place on every revert, so reverting the change never
 "fails" the check by deleting the test itself.
@@ -72,8 +74,8 @@ it.
 - **Runs only what was registered, only when approved.** The judge executes exactly the command stored in the hashed
   record, after it is approved at Hermes's approval prompt (or `--approve` on the CLI). falsify cannot tell whether
   a person or a script answered that prompt.
-- **Never writes your repo.** It reads your working tree through a private git index and runs everything in temporary
-  copies.
+- **Never changes your files.** It reads your working tree through a private git index and runs checks in temporary
+  copies. It keeps its own store in `.falsify/` (move it with `--store` or `FALSIFY_STORE`, or add it to `.gitignore`).
 - **Keeps a ledger.** Every registration and verdict is a hash-chained line, so retrying until green shows up.
 
 ## Disclosure: it runs your commands, without a sandbox
@@ -100,4 +102,5 @@ mutant derived from the agent's own change, so a check that passes without the c
 - Tests: `python3 -m unittest discover -s tests`, run from a clone whose directory name is a valid Python identifier
   (the root `__init__.py` makes the repo a package).
 - `docs/design-notes.md`: blind mutants, withheld files, the commit-first rule, sessions.
-- `catalog/`: the plugin-catalog entry and `fill.py`, which renders it once the repo is named.
+- `submission/PROVED.md`: what is proved (each claim with the test or run behind it) and what is not.
+- `catalog/`: the plugin-catalog entry and `fill.py`, which renders it with the repo name and a pinned commit.

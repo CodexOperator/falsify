@@ -407,7 +407,7 @@ MUL = {"path": "subject.py", "old": "return a + b", "new": "return a * b"}
 
 
 class Blind(Base):
-    """step 4: a claim with NO diff is judged against ONE blind mutant, drafted from the claim's words at register and
+    """a claim with NO diff is judged against ONE blind mutant, drafted from the claim's words at register and
     drawn after the run by a committed seed."""
     def setUp(self):
         super().setUp()
@@ -461,7 +461,7 @@ class Blind(Base):
         sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "tests")
 
     def test_a_pathless_pytest_check_withholds_pytests_discovery_set(self):
-        # plasma's red case: 'python -m pytest -q' over a repo with tests/test_cart.py must not show that file
+        # the red case: 'python -m pytest -q' over a repo with tests/test_cart.py must not show that file
         self.discovery_repo({"checks/probe.py": "", "check_x.py": "", "pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["checks"]\n',
                              "pytest.ini": "[pytest]\npython_files = check_*.py test_*.py\n"})
         rid = self.S.register("add works", self.repo, [PY, "-m", "pytest", "-q"], blind=2)
@@ -588,7 +588,7 @@ class StoreInsideRepo(Base):
         self.assertEqual(F.Store(os.path.join(self.repo, "a", "st"))._store_pathspec(self.repo), (":(exclude,literal)a/st",))
 
 class Bytecode(Base):
-    """M-GOLD's bug (g5.53 a08): bytecode copied into a mutant tree can outlive the revert. Here the FIXED code's .pyc
+    """a bug a positive-control run found: bytecode copied into a mutant tree can outlive the revert. Here the FIXED code's .pyc
     is unchecked-hash (PEP 552: python loads it without looking at the source), the deterministic form of a copied
     .pyc whose source mtime + size still match after a same-second, same-size revert."""
     def setUp(self):
@@ -640,10 +640,10 @@ class Draft(unittest.TestCase):
         sent = []
         post = lambda u, payload, h, t: sent.append((u, payload, h)) or {"content": [{"type": "thinking", "thinking": ""},
                                                                                      {"type": "text", "text": '{"mutants": []}'}]}
-        dr = D.make_drafter("http://door:1", "claude-haiku-5-5", k=2, post=post, api="anthropic", view="claim", api_key="lbl")
+        dr = D.make_drafter("http://api.test:1", "claude-haiku-5-5", k=2, post=post, api="anthropic", view="claim", api_key="lbl")
         self.assertEqual(dr("X is 1", {"f.py": "SECRET_CODE = 1\n"}), [])
         ((u, payload, h),) = sent
-        self.assertEqual((u, h["x-api-key"], h["anthropic-version"]), ("http://door:1/v1/messages", "lbl", "2023-06-01"))
+        self.assertEqual((u, h["x-api-key"], h["anthropic-version"]), ("http://api.test:1/v1/messages", "lbl", "2023-06-01"))
         self.assertIn("CLAIM: X is 1", payload["messages"][0]["content"])
         self.assertNotIn("SECRET_CODE", json.dumps(payload))
         self.assertNotIn("temperature", payload)

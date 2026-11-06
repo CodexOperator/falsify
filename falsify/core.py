@@ -26,10 +26,10 @@ v2: the mutant is DERIVED from the agent's own change, never written by the agen
 
 R1 (rule 12): the judge runs ONLY the argv already in the hashed record, and only what an APPROVER says yes to:
 judge() takes approve(kind, argv, cwd, record_sha) -> bool, asked BEFORE anything runs; no approver, a "no", or
-interactive=False (cron, gateway, any non-interactive caller) = VOID 'not run', never a silent run.
+interactive=False (cron, a webhook, any non-interactive caller) = VOID 'not run', never a silent run.
 R2 (rule 9): falsify never blocks completion; it records verdicts and NUDGES (falsify.adapter.make_pre_verify).
 
-BLIND (step 4, plasma's form): a claim with NO diff (docs, config, "it already works") has no change to revert. At
+BLIND: a claim with NO diff (docs, config, "it already works") has no change to revert. At
 register, blind=K asks the store's DRAFTER (a separate model: falsify.draft) for K mutants drafted from the claim's
 words and the base tree's files only, never the check; each is {path, old, new}, an edit of one exact occurrence. The
 valid ones are hashed into the record with sha256 of a fresh seed (commit); the seed waits in seeds/. Every file the
@@ -134,7 +134,7 @@ BYTECODE = ("__pycache__", "*.pyc", "*.pyo")
 def copy_tree(repo, dst):
     """the working tree into a throwaway dst, minus .git and every bytecode file: a copied .pyc keeps its source's
     mtime, so a revert landing in the same second with a same-size change (a moved line) would load the FIXED bytecode
-    and an honest check would read 'passes without your change' (found by director-thought-science's M-GOLD, g5.53)."""
+    and an honest check would read 'passes without your change' (found by a positive-control run)."""
     shutil.copytree(repo, dst, symlinks=True, ignore=shutil.ignore_patterns(".git", *BYTECODE))
 
 
@@ -286,7 +286,7 @@ CHECK_SHAPE = ('expected {"argv": [str, ...], "cwd"?: str (relative to the repo)
 SHAPES = {
     "claim": 'expected a non-empty string; e.g. "cart.total applies the 10% discount once"',
     "repo": 'expected a path inside a git work tree; e.g. "." or "/home/me/shop"',
-    "base": 'expected a commit-ish in repo (default "HEAD"); e.g. "HEAD" or "a1d03c2"',
+    "base": 'expected a commit-ish in repo (default "HEAD"); e.g. "HEAD" or "abc1234"',
     "keep": 'expected a list of repo-relative globs; e.g. ["tests/test_cart.py", "tests/**"]',
     "blind": 'expected K, the number of blind mutants to draft for a claim with no diff; e.g. 5',
 }

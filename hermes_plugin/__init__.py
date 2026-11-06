@@ -1,4 +1,4 @@
-"""falsify for Hermes Agent: the THIN layer over falsify.adapter (module boundary agreed with director-thought-1:
+"""falsify for Hermes Agent: the THIN layer over falsify.adapter (one module boundary:
 this package imports falsify.adapter, falsify.draft, Store, Refused and CHECK_SHAPE only and never calls subprocess).
 
 Seams (hermes-agent ca43606920, all public; rule 9: nothing wraps or rebinds AIAgent's finish):

@@ -1,4 +1,3 @@
-<!-- DRAFT, private: the form's entry text, 150 words. Numbers only from goal:g5.52 once committed. -->
 falsify makes an agent's "it's fixed" falsifiable. Before touching code, the agent pre-registers its claim, the check
 and the base commit, hashed. Afterwards falsify runs that check twice in temporary copies: on
 the agent's final tree, where it must pass, and with the agent's own change reverted, where it must fail. A check that

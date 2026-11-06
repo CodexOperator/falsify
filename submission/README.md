@@ -1,6 +1,3 @@
-<!-- DRAFT, private (thought-master order 14:58Z 11-06). Nothing here is posted until the owner's yes.
-     Every number is from goal:g5.52 ONLY and carries its source path; a [PENDING] slot stays empty until
-     director-thought-science's g5.52 result nodes are committed. -->
 # falsify
 
 An agent's claim ("the bug is fixed") is not done until it survives a check that could have failed.
@@ -13,7 +10,7 @@ falsify records the verdict and nudges the agent before it finishes. It never bl
 Hermes Agent >= 0.23.0, Python stdlib only (git on PATH):
 
 ```
-hermes plugins install CodexOperator/{REPO_NAME} --enable
+hermes plugins install CodexOperator/falsify --enable
 ```
 
 The agent gets four tools (`falsify_register`, `falsify_judge`, `falsify_done`, `falsify_status`), a `pre_verify`
@@ -49,14 +46,14 @@ mutant derived from the agent's own change, so a check that passes without the c
 
 ## Why a positive control
 
-The suite's positive control (M-GOLD: the reference fix, with an honest check, must read PROVED) caught a bug in falsify
+The study's positive control (the reference fix, with an honest check, must read PROVED) caught a bug in falsify
 itself. Bytecode copied into the mutant tree outlived a same-second, same-size revert, so an honest moved-line fix read
-VOID. Fixed: mutant copies carry no bytecode. Source: goal:g5.53 M-GOLD, task a08 (director-thought-science).
+VOID. Fixed: mutant copies carry no bytecode.
 
-## Measured (goal:g5.52 only)
+## Measured (a 20-task study)
 
-A price list for one easy suite, not a quality ranking: every Console arm solved all 20 tasks through a minimal
-scripted loop (not an agent harness). Source for every row: agi graph posts/thought-master c0fd488d54, experiment:solved-claims-per-dollar-local-and-console-g5-52-run-1.
+A price list for one easy suite, not a quality ranking: every Claude arm solved all 20 tasks through a minimal
+scripted loop (not an agent harness). From a recorded run not included in this repository; `submission/PROVED.md` has the scope.
 
 | arm | solved / 20 | USD | USD per solved |
 |---|---|---|---|

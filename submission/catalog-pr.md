@@ -1,5 +1,3 @@
-<!-- DRAFT, private: never opened as a PR until the owner's yes. the repo is CodexOperator/{REPO_NAME}; render
-     catalog/falsify.yaml with catalog/fill.py <repo name> <sha> once the owner names the repo. -->
 # Add falsify to the plugin catalog
 
 **What it is.** A Hermes Agent plugin that makes a coding claim falsifiable. The agent pre-registers a claim, its check

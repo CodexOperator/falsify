@@ -1,6 +1,6 @@
 """Render catalog/falsify.yaml for submission: python catalog/fill.py <repo name> <40-hex sha> [out]
 The entry lives on the owner's GitHub account (CodexOperator); the committed file keeps {REPO_NAME} and {SHA} as
-placeholders until the owner names the repo and pins the commit. This writes the filled copy (default: stdout) and
+placeholders, filled at submission with the repo name and the pinned commit. This writes the filled copy (default: stdout) and
 refuses a value the catalog validator would reject."""
 import os
 import re
@@ -12,7 +12,7 @@ def fill(text, repo_name, sha):
         raise SystemExit(f"repo name must be a GitHub repository name, got {repo_name!r}")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise SystemExit(f"sha must be exactly 40 lowercase hex characters, got {sha!r}")
-    # the rendered copy is public: drop the template's own comments (a private DRAFT note, the PLACEHOLDER marks)
+    # the rendered copy is public: drop the template's own comments (the template note, the placeholder marks)
     text = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#")) + "\n"
     text = re.sub(r'(sha: "\{SHA\}")\s+#.*', r"\1", text)
     out = text.replace("{REPO_NAME}", repo_name).replace("{SHA}", sha)

@@ -2,7 +2,7 @@ name: falsify
 version: 0.1.0
 requires_hermes: ">=0.23.0"
 description: "A claim is not done until its pre-registered check passes on the agent's change AND fails with that change reverted (VOID if it passes without it). Nudges before finish via pre_verify; never blocks completion; every check runs only after a human approves its exact argv."
-author: "falsify (private, pre-release)"
+author: "falsify contributors"
 provides_hooks:
   - pre_verify
   - pre_tool_call

@@ -1,7 +1,7 @@
-# DRAFT, private: never a PR, never a push, until the owner's yes. The brace placeholders (repo name, sha) are filled by catalog/fill.py.
+# Template: catalog/fill.py fills the brace placeholders (repo name, pinned sha) and drops these comments.
 name: falsify
 repo: "https://github.com/CodexOperator/{REPO_NAME}"
-sha: "{SHA}"  # PLACEHOLDER: the pinned 40-hex commit at submission
+sha: "{SHA}"  # the pinned 40-hex commit at submission
 description: >-
   A claim is not done until it survives a check that could have failed. The agent pre-registers each
   claim BEFORE changing anything (its check and the base commit), hashed before any run; judging runs the

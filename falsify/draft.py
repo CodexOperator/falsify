@@ -1,4 +1,4 @@
-"""The BLIND drafter (step 4, plasma's form): K mutants for a claim with no diff, drafted by a model that reads the
+"""The BLIND drafter: K mutants for a claim with no diff, drafted by a model that reads the
 claim's words (view "claim") or the claim's words and the base tree's files (view "files"), never the check or a
 result. Stdlib only: an OpenAI-compatible /v1/chat/completions endpoint (the local llama.cpp server) or the
 Anthropic Messages API (api "anthropic", e.g. claude-haiku-5-5 through a proxy base URL). falsify.core hashes what it returns into the record; it decides nothing."""
@@ -88,7 +88,7 @@ def make_drafter(url, model, k=5, timeout=600, temperature=0.7, api_key=None, po
 
 
 def from_env(env=None):
-    """FALSIFY_DRAFT_URL (an OpenAI-compatible base, e.g. http://127.0.0.1:8091/v1, or with FALSIFY_DRAFT_API=anthropic
+    """FALSIFY_DRAFT_URL (an OpenAI-compatible base, e.g. http://localhost:8080/v1, or with FALSIFY_DRAFT_API=anthropic
     a Messages API base), FALSIFY_DRAFT_MODEL, FALSIFY_DRAFT_K, FALSIFY_DRAFT_VIEW (files | claim);
     the key, if any, from FALSIFY_DRAFT_KEY in the environment only (never a file). -> a drafter, or None."""
     env = os.environ if env is None else env
