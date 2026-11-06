@@ -6,8 +6,8 @@ description: How to make a claim falsifiable before calling it done.
 
 A claim ("the bug is fixed", "the test covers X") is not done until it survives a check that COULD have failed.
 
-1. `falsify_register` BEFORE you change anything: the claim, the git repo, a check (argv that must exit 0; cwd
-   relative to the repo) and the base commit (default HEAD). Keep the record sha. You do NOT write a mutant:
+1. `falsify_register` BEFORE you change anything: the claim, the git repo, a check (argv that must exit 0, e.g.
+   `{"argv": ["python", "-m", "pytest", "-q", "tests/test_cart.py"]}` or just the list; cwd relative to the repo) and the base commit (default HEAD). Keep the record sha. You do NOT write a mutant:
    falsify derives it from your own change, reverted.
    If you will add the check's own test file in the change, pass `keep` (e.g. `["tests/**"]`) so reverting your
    change never deletes the test itself. For pytest, `kill_rc` is `[1]` (the default): rc 2-5 are collection or

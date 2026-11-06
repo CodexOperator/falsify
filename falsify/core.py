@@ -126,18 +126,41 @@ def revert(dst, patch):
 
 
 # ---------- the record ----------
-def _norm_check(c):
+CHECK_SHAPE = ('expected {"argv": [str, ...], "cwd"?: str (relative to the repo), "expect_rc"?: int, "kill_rc"?: [int], '
+               '"timeout_s"?: number}, or a bare list of strings (= argv); e.g. {"argv": ["python", "-m", "pytest", "-q", '
+               '"tests/test_cart.py"]}')
+SHAPES = {
+    "claim": 'expected a non-empty string; e.g. "cart.total applies the 10% discount once"',
+    "repo": 'expected a path inside a git work tree; e.g. "." or "/home/me/shop"',
+    "base": 'expected a commit-ish in repo (default "HEAD"); e.g. "HEAD" or "a1d03c2"',
+    "keep": 'expected a list of repo-relative globs; e.g. ["tests/test_cart.py", "tests/**"]',
+}
+
+
+def refused(field, msg):
+    """a schema refusal: the reason, then the expected shape and a one-line example."""
+    return Refused(f"{msg}; {CHECK_SHAPE if field in ('check', 'sanity') else SHAPES[field]}")
+
+
+def _norm_check(c, field="check"):
+    if isinstance(c, list):
+        c = {"argv": c}   # a bare list of strings is the argv
     if not isinstance(c, dict) or not isinstance(c.get("argv"), list) or not c["argv"] or not all(isinstance(a, str) for a in c["argv"]):
-        raise Refused("check.argv must be a non-empty list of strings")
+        raise refused(field, f"{field}.argv must be a non-empty list of strings")
+    if not isinstance(c.get("cwd", "."), str):
+        raise refused(field, f"{field}.cwd must be a string")
     cwd = os.path.normpath(c.get("cwd", "."))
     if os.path.isabs(cwd) or cwd.split(os.sep)[0] == "..":
-        raise Refused("check.cwd must be relative to the repo and inside it")
-    kill = sorted({int(x) for x in c.get("kill_rc", [1])})
-    exp = int(c.get("expect_rc", 0))
+        raise refused(field, f"{field}.cwd must be relative to the repo and inside it")
+    try:
+        kill = sorted({int(x) for x in c.get("kill_rc", [1])})
+        exp = int(c.get("expect_rc", 0))
+        timeout = float(c.get("timeout_s", DEFAULT_TIMEOUT_S))
+    except (TypeError, ValueError):
+        raise refused(field, f"{field}.expect_rc / kill_rc / timeout_s must be an int / a list of ints / a number") from None
     if not kill or exp in kill:
-        raise Refused("check.kill_rc must be a non-empty list of exit codes that excludes expect_rc")
-    return {"argv": list(c["argv"]), "cwd": cwd, "expect_rc": exp, "kill_rc": kill,
-            "timeout_s": float(c.get("timeout_s", DEFAULT_TIMEOUT_S))}
+        raise refused(field, f"{field}.kill_rc must be a non-empty list of exit codes that excludes expect_rc")
+    return {"argv": list(c["argv"]), "cwd": cwd, "expect_rc": exp, "kill_rc": kill, "timeout_s": timeout}
 
 
 class Store:
@@ -176,17 +199,25 @@ class Store:
     # ---- register ----
     def register(self, claim, repo, check, base="HEAD", note="", sanity=None, keep=()):
         if not isinstance(claim, str) or not claim.strip():
-            raise Refused("claim must be a non-empty string")
-        top = git(os.path.abspath(repo), "rev-parse", "--show-toplevel").decode().strip()
-        b = git(top, "rev-parse", "--verify", f"{base}^{{commit}}").decode().strip()
+            raise refused("claim", "claim must be a non-empty string")
+        if not isinstance(repo, str) or not repo.strip():
+            raise refused("repo", "repo must be a non-empty string")
+        try:
+            top = git(os.path.abspath(repo), "rev-parse", "--show-toplevel").decode().strip()
+        except Refused as e:
+            raise refused("repo", f"repo {repo!r} is not inside a git work tree ({e})") from None
+        try:
+            b = git(top, "rev-parse", "--verify", f"{base}^{{commit}}").decode().strip()
+        except Refused as e:
+            raise refused("base", f"base {base!r} is not a commit in {top} ({e})") from None
         rec = {"claim": claim, "repo": top, "base": b, "base_tree": git(top, "rev-parse", f"{b}^{{tree}}").decode().strip(),
                "check": _norm_check(check), "note": note, "registered_at": now()}
         if sanity is not None:
-            s = _norm_check(sanity)
+            s = _norm_check(sanity, "sanity")
             rec["sanity"] = {k: s[k] for k in ("argv", "cwd", "expect_rc", "timeout_s")}
         if keep:
             if not isinstance(keep, (list, tuple)) or not all(isinstance(k, str) and k and not k.startswith(("/", ":")) for k in keep):
-                raise Refused("keep must be a list of repo-relative globs")
+                raise refused("keep", "keep must be a list of repo-relative globs")
             rec["keep"] = sorted(set(keep))
         h = self._write_once("records", rec)
         self._log({"event": "register", "record": h, "claim": claim})

@@ -34,10 +34,10 @@ class FakeState:
 
 class FakeCtx:
     def __init__(self, d):
-        self.state, self.tools, self.hooks, self.skills = FakeState(d), {}, {}, {}
+        self.state, self.tools, self.hooks, self.skills, self.schemas = FakeState(d), {}, {}, {}, {}
 
     def register_tool(self, name, toolset, schema, handler, **kw):
-        self.tools[name] = handler
+        self.tools[name], self.schemas[name] = handler, schema
 
     def register_hook(self, name, fn):
         self.hooks.setdefault(name, []).append(fn)
@@ -129,6 +129,16 @@ class TestHermesPlugin(unittest.TestCase):
         rid_res = res["result"]
         self.call("falsify_done", {"claim": "X is 1", "result": rid_res})
         self.assertIsNone(pv(attempt=0))
+
+    def test_register_takes_a_bare_list_and_a_bad_check_gets_its_shape(self):
+        r = self.call("falsify_register", {"claim": "Y", "repo": str(self.work), "check": [sys.executable, "-c", "pass"]})
+        self.assertEqual(len(r["record"]), 64, r)
+        err = self.call("falsify_register", {"claim": "Y", "repo": str(self.work), "check": "pytest -q"})["error"]
+        self.assertIn("check.argv must be a non-empty list of strings; expected {\"argv\"", err)
+        self.assertIn("e.g. {\"argv\": [", err)
+        chk = self.ctx.schemas["falsify_register"]["parameters"]["properties"]["check"]
+        self.assertIn({"type": "array", "items": {"type": "string"}}, chk["anyOf"])
+        self.assertIn("e.g.", chk["description"])
 
     def test_register_writes_nothing(self):
         d = tempfile.mkdtemp()

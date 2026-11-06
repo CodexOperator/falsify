@@ -2,7 +2,8 @@
 
 A Hermes Agent plugin: an agent's claim is not proved until it survives a check that could have failed.
 
-- **Pre-register:** BEFORE changing anything, the agent registers the claim, its check (an argv) and the base commit.
+- **Pre-register:** BEFORE changing anything, the agent registers the claim, its check (an argv: `{"argv": [...]}` or
+  a bare list of strings) and the base commit. A malformed spec is refused with the expected shape and an example.
   The record is hashed (sha256); an edit is a new record.
 - **Judge:** after the change, the check must PASS on the agent's final tree and FAIL with the agent's own change
   reverted. The agent never writes the mutant: it is derived from the change. Each hunk is then reverted alone, so a

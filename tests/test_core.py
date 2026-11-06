@@ -72,6 +72,21 @@ class Register(Base):
             self.S.register("c", self.repo, {"argv": ["x"]}, base="no-such-ref")
 
 
+    def test_a_bare_list_is_the_argv(self):
+        self.assertEqual(self.S.register("c", self.repo, [PY, "test_add.py"]), self.S.register("c", self.repo, {"argv": [PY, "test_add.py"]}))
+        self.assertEqual(self.S.load("records", self.S.register("c", self.repo, ["x"], sanity=["y"]))[0]["sanity"]["argv"], ["y"])
+
+    def test_every_schema_error_shows_the_expected_shape_and_an_example(self):
+        bad = [dict(check=c) for c in ([], [1], {"argv": []}, {"argv": "x"}, {"argv": ["x"], "cwd": "/etc"}, {"argv": ["x"], "cwd": 3},
+                                       {"argv": ["x"], "kill_rc": [0]}, {"argv": ["x"], "expect_rc": "zero"}, {"argv": ["x"], "timeout_s": [1]}, "pytest")]
+        bad += [dict(claim=" "), dict(claim=None), dict(repo=None), dict(repo=self.tmp.name), dict(base="no-such-ref"),
+                dict(sanity={"argv": []}), dict(keep="tests/*"), dict(keep=["/abs"])]
+        for b in bad:
+            a = {"claim": "c", "repo": self.repo, "check": ["x"], **b}
+            with self.subTest(b), self.assertRaises(F.Refused) as e:
+                self.S.register(a.pop("claim"), a.pop("repo"), a.pop("check"), **a)
+            self.assertRegex(str(e.exception), r"; expected .+; e\.g\. \S", str(e.exception))
+
 class Judge(Base):
     def test_a_check_that_needs_the_change_is_proved_with_its_hunk_coverage(self):
         rid = self.reg()

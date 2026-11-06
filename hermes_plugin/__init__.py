@@ -1,5 +1,5 @@
 """falsify for Hermes Agent: the THIN layer over falsify.adapter (module boundary agreed with director-thought-1:
-this package imports falsify.adapter + falsify.Store only and never calls subprocess).
+this package imports falsify.adapter, Store, Refused and CHECK_SHAPE only and never calls subprocess).
 
 Seams (hermes-agent ca43606920, all public; rule 9: nothing wraps or rebinds AIAgent's finish):
 - pre_verify (agent/turn_stop_gates.py:69): falsify.adapter.make_pre_verify -> a NUDGE naming open claims; it never blocks.
@@ -15,7 +15,7 @@ import json
 import os
 import threading
 
-from ..falsify import Refused, Store, adapter
+from ..falsify import CHECK_SHAPE, Refused, Store, adapter
 
 RULE_PREFIX = "falsify:"
 HUMAN_YES = frozenset({"once", "session", "always"})
@@ -99,10 +99,12 @@ def make_tools(store, grants):
         return _json({"open": [{"record": r, "claim": c, "verdict": v, "why": w} for r, c, v, w in store.open_claims()],
                       "audit": [{"line": ln, "reason": why} for ln, why in store.audit()]})
 
-    argv = {"type": "object", "properties": {
-        "argv": {"type": "array", "items": {"type": "string"}}, "cwd": {"type": "string"},
-        "expect_rc": {"type": "integer"}, "timeout_s": {"type": "number"},
-        "kill_rc": {"type": "array", "items": {"type": "integer"}}}, "required": ["argv"]}
+    argv = {"description": "The command that must pass: " + CHECK_SHAPE, "anyOf": [
+        {"type": "object", "properties": {
+            "argv": {"type": "array", "items": {"type": "string"}}, "cwd": {"type": "string"},
+            "expect_rc": {"type": "integer"}, "timeout_s": {"type": "number"},
+            "kill_rc": {"type": "array", "items": {"type": "integer"}}}, "required": ["argv"]},
+        {"type": "array", "items": {"type": "string"}}]}
 
     def schema(name, desc, props, req):
         return {"name": name, "description": desc,
