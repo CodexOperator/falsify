@@ -22,10 +22,10 @@
 | Stale bytecode cannot fake a pass on a reverted tree (the bug the suite's positive control found) | test_a_same_size_moved_line_fix_with_an_honest_check_reads_proved; goal:g5.53 M-GOLD a08 (director-thought-science) |
 | Under Hermes, the drafter's URL and key come only through Hermes's secret scope | test_the_drafter_key_comes_from_hermes_secret_scope_never_os_environ |
 | The plugin passes Hermes's own checks | `hermes plugins validate`: "Validation passed." (15 checks, on a fresh clone of main 8872228); catalog validator OK on a fill.py-rendered copy |
-| Hermes + Haiku, UNHINTED task: the agent registered a claim, a human allowed the judge once, the verdict was proved | /fast/director-thought-goals/session/transcript10.txt ("The claim is registered and judged proved. It is recorded as open, not marked done.") |
-| Hermes + local Qwen3-4B, HINTED task (the prompt named the falsify calls): register, judge, proved | /fast/director-thought-goals/session/transcript8.txt |
+| Hermes + Haiku, UNHINTED task (the prompt names no falsify call): the agent registered a claim on its own; Hermes's approval prompt showed the exact check; the run's one approval was answered "Allow once" by a scripted stand-in for the user (drive_session.py, not a human); the verdict was proved, covering 1 of 1 hunks; the agent left it open, not done | /fast/director-thought-goals/session/transcript10.txt (:75 prompt, :326-333 approval prompt, :412 "The claim is registered and judged proved. It is recorded as open, not marked done.", :431 verdict); drive10.out "approvals [(31.5, 'o')]" |
+| Hermes + local Qwen3-4B, SCRIPTED task (the prompt gave the exact falsify_register arguments, the check and each call in order): register, judge, proved | /fast/director-thought-goals/session/transcript8.txt (:75-79 = task-hinted.md) |
 | goal:g5.52, 20 tasks (SOLVED = falsify PROVED on the agent's own check AND a hidden test passes): Haiku 5.5 20/20 for $0.0198 ($0.00099 per solve), Sonnet 5.5 batch 20/20 $0.0701, Sonnet 5.5 20/20 $0.2656, Opus 5.5 20/20 $0.6762, local Qwen3-4B 6/20 at $0 | agi graph posts/thought-master c0fd488d54, experiment:solved-claims-per-dollar-local-and-console-g5-52-run-1; hypothesis:solved-claims-per-dollar-local-and-console-g5-52 (proved) |
-| On that suite, falsify could not be gamed: an agent that edits nothing solved 0/20, one that only adds a passing test read VOID on 20/20, and the reference fix read SOLVED 20/20 | same experiment node (M-SOLVE, M-HIDE, M-GOLD) |
+| On that suite, two planted ways to game it failed on all 20 tasks: an agent that edits nothing solved 0/20; one that only adds a passing test read VOID on 20/20. The reference fix (the positive control) read SOLVED 20/20 | same experiment node (M-SOLVE, M-HIDE, M-GOLD) |
 | Prompt caching cut Sonnet's bill to 0.636 of the same usage priced flat | same experiment node (E-CACHE) |
 
 ## Not proved, and the limits
@@ -38,10 +38,13 @@
 - **Closing the claim:** in session 10 the agent did not call `falsify_done`. The closing-call hint (G3) is on main and
   tested, but no Hermes run with it has been recorded yet.
 - **Unprompted use by the local 4B model is not shown.** Session 11 (local, unhinted): 0 falsify tool calls in 14 min 58 s
-  (900 s budget; a dangerous-command approval timed out unanswered), per /fast/director-thought-goals/session/transcript11.txt.
-  Its nudge is goals' reading: Hermes strips the synthetic nudge from the transcript, so the bytes do not show it.
-- **Hermes 3 is not agentic** (serve.sh's measurement: 0 tool calls in two Hermes sessions; Hermes Agent warns about it),
-  so the demo runs Qwen3-4B (local) and claude-haiku-5-5.
+  (Hermes's own Duration line; 900 s budget), and a dangerous-command approval timed out unanswered (:5696, :5701), per
+  /fast/director-thought-goals/session/transcript11.txt. The nudge's text is not printed (Hermes stores it as a synthetic
+  user turn), but its trace is: after the landed patch (:1572) the model replies "the user is pointing out that I didn't
+  use the falsify tools" (:5737), and Hermes counts 2 user messages (:6490-6491) where the task is the only visible one.
+- **Hermes 3 is not agentic.** Hermes Agent's own banner warns "Nous Research Hermes 3 & 4 models are NOT agentic". In our
+  three Hermes-3-8B sessions (transcript1-3.raw) it made 1 tool call, and that one failed on our harness's missing
+  directory (exit 126), not on the model. So the demo runs Qwen3-4B (local) and claude-haiku-5-5.
 - **Discovery:** tests a custom runner finds under other names are not withheld from the blind drafter.
 - **g5.52's scope.** Its Console arms ran through a minimal SCRIPTED loop, not an agent harness (the owner has since
   ruled the Console door harness-only), and every Console arm solved 20/20. So its dollar figures are a price list
