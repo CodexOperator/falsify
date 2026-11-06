@@ -1,5 +1,5 @@
 """falsify for Hermes Agent: the THIN layer over falsify.adapter (module boundary agreed with director-thought-1:
-this package imports falsify.adapter, Store, Refused and CHECK_SHAPE only and never calls subprocess).
+this package imports falsify.adapter, falsify.draft, Store, Refused and CHECK_SHAPE only and never calls subprocess).
 
 Seams (hermes-agent ca43606920, all public; rule 9: nothing wraps or rebinds AIAgent's finish):
 - pre_verify (agent/turn_stop_gates.py:69): falsify.adapter.make_pre_verify -> a NUDGE naming open claims; it never blocks.
@@ -15,7 +15,7 @@ import json
 import os
 import threading
 
-from ..falsify import CHECK_SHAPE, Refused, Store, adapter
+from ..falsify import CHECK_SHAPE, Refused, Store, adapter, draft
 
 RULE_PREFIX = "falsify:"
 HUMAN_YES = frozenset({"once", "session", "always"})
@@ -77,7 +77,7 @@ def make_tools(store, grants):
     def register(args, **_):
         try:
             rid = store.register(args.get("claim"), args.get("repo"), args.get("check"), args.get("base") or "HEAD",
-                                 args.get("note", ""), args.get("sanity"), args.get("keep") or ())
+                                 args.get("note", ""), args.get("sanity"), args.get("keep") or (), args.get("blind") or 0)
         except Refused as e:
             return _json({"error": str(e)})
         return _json({"record": rid})
@@ -114,10 +114,13 @@ def make_tools(store, grants):
         ("falsify_register", schema("falsify_register",
             "Pre-register a claim BEFORE you change anything: the claim, the git repo, the check (argv that must "
             "pass; cwd relative to the repo) and the base commit (default HEAD). Hashed before any run; returns the "
-            "record sha. Runs nothing. The mutant is derived later: your own change, reverted.",
+            "record sha. Runs nothing. The mutant is derived later: your own change, reverted. If you will change NO "
+            "file (the claim is that something already holds), pass blind (e.g. 5): falsify drafts that many mutants "
+            "from your claim's words alone, hashes them, and draws one after the run.",
             {"claim": {"type": "string"}, "repo": {"type": "string"}, "check": argv, "base": {"type": "string"},
              "note": {"type": "string"}, "sanity": argv,
-             "keep": {"type": "array", "items": {"type": "string"}}}, ["claim", "repo", "check"]), register),
+             "keep": {"type": "array", "items": {"type": "string"}}, "blind": {"type": "integer"}},
+            ["claim", "repo", "check"]), register),
         ("falsify_judge", schema("falsify_judge",
             "Judge a registered claim after your change: once a HUMAN approves the exact argv, run the check on your "
             "final tree (must pass) and with your change reverted, whole and per hunk (must fail). proved (k of h "
@@ -144,7 +147,7 @@ class LazyStore:
     def __getattr__(self, name):
         with self._lock:
             if self._store is None:
-                self._store = Store(str(self._ctx.state.data_dir / "store"))
+                self._store = Store(str(self._ctx.state.data_dir / "store"), drafter=draft.from_env())
         return getattr(self._store, name)
 
 

@@ -14,7 +14,7 @@ v2: the mutant is DERIVED from the agent's own change, never written by the agen
               check that dies on it with an rc outside the pinned KILL_RC (pytest: 2-5 are collection / usage
               errors, not kills) or times out                -> VOID "unrevertable", never a kill
               check passes with the whole change reverted -> VOID "your check passes without your change"
-              no change (B == F)                           -> VOID "no mutant"
+              no change (B == F), no blind mutants         -> VOID "no mutant"
               otherwise                                    -> proved, with k of h
             The result is written content-addressed too (results/<sha>.json), naming the record's sha.
   ledger    ledger.jsonl: an APPEND-ONLY, hash-chained log of every register and every judge (each line names the
@@ -29,13 +29,22 @@ judge() takes approve(kind, argv, cwd, record_sha) -> bool, asked BEFORE anythin
 interactive=False (cron, gateway, any non-interactive caller) = VOID 'not run', never a silent run.
 R2 (rule 9): falsify never blocks completion; it records verdicts and NUDGES (falsify.adapter.make_pre_verify).
 
+BLIND (step 4, plasma's form): a claim with NO diff (docs, config, "it already works") has no change to revert. At
+register, blind=K asks the store's DRAFTER (a separate model: falsify.draft) for K mutants drafted from the claim's
+words and the base tree's files only, never the check; each is {path, old, new}, an edit of one exact occurrence. The
+valid ones are hashed into the record with sha256 of a fresh seed (commit); the seed waits in seeds/. At judge, with no
+diff, the seed is revealed and must hash to the commit, and mutant j = sha256(seed + record sha) mod K is DRAWN: the
+check must pass on the final tree and be killed on the final tree with mutant j applied (same kill quality as a
+revert). A drawn mutant that does not apply is VOID "unrevertable"; one the check passes is VOID "your check passes
+on the drawn blind mutant". The agent never writes, sees in advance, or picks the mutant it is judged against.
+
 KEEP: pre-registered globs (e.g. "tests/**") whose part of the change is never reverted, so a mutant never "kills"
 the check by deleting the check's own new test (a trivial kill); those hunks are reported, not measured.
 
 Temp copies exclude `.git` (the check runs on files, not history) and include ignored files (a venv, build outputs),
 so both trees differ ONLY by the change.
 """
-import fcntl, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+import fcntl, hashlib, json, os, re, secrets, shutil, subprocess, sys, tempfile, time
 
 DEFAULT_TIMEOUT_S = 60
 OUT_CAP = 4096
@@ -125,6 +134,51 @@ def revert(dst, patch):
         shutil.rmtree(os.path.join(dst, ".git"), ignore_errors=True)
 
 
+def base_files(top, base, max_file=8000, max_total=60000):
+    """{path: text} of the base commit's tracked text files, each <= max_file chars, <= max_total in all: what a blind
+    drafter reads (the claim's words plus this; never the check)."""
+    out, total = {}, 0
+    for path in git(top, "ls-tree", "-r", "--name-only", "-z", base).decode().split("\0"):
+        if not path:
+            continue
+        try:
+            text = git(top, "show", f"{base}:{path}").decode()
+        except (Refused, UnicodeDecodeError):
+            continue
+        if "\0" in text or len(text) > max_file or total + len(text) > max_total:
+            continue
+        out[path], total = text, total + len(text)
+    return out
+
+
+def _blind_ok(m, files):
+    """a drafted mutant is kept only as {path, old, new}: a base file, old occurring in it exactly once, old != new."""
+    if not isinstance(m, dict) or not all(isinstance(m.get(k), str) for k in ("path", "old", "new")):
+        return None
+    m = {"path": os.path.normpath(m["path"]), "old": m["old"], "new": m["new"]}
+    if not m["old"] or m["old"] == m["new"] or m["path"] not in files or files[m["path"]].count(m["old"]) != 1:
+        return None
+    return m
+
+
+def apply_blind(dst, m):
+    """edit one exact occurrence in dst (a throwaway copy) -> None, or the reason it did not apply."""
+    p = os.path.join(dst, m["path"])
+    if os.path.isabs(m["path"]) or m["path"].split(os.sep)[0] == ".." or not os.path.isfile(p):
+        return f"{m['path']} is not a file in the tree"
+    with open(p, encoding="utf-8", errors="surrogateescape") as f:
+        text = f.read()
+    if text.count(m["old"]) != 1:
+        return f"its old text occurs {text.count(m['old'])} times in {m['path']}, not once"
+    with open(p, "w", encoding="utf-8", errors="surrogateescape") as f:
+        f.write(text.replace(m["old"], m["new"]))
+    return None
+
+
+def draw_index(seed, rid, k):
+    return int(sha((seed + rid).encode()), 16) % k
+
+
 # ---------- the record ----------
 CHECK_SHAPE = ('expected {"argv": [str, ...], "cwd"?: str (relative to the repo), "expect_rc"?: int, "kill_rc"?: [int], '
                '"timeout_s"?: number}, or a bare list of strings (= argv); e.g. {"argv": ["python", "-m", "pytest", "-q", '
@@ -134,6 +188,7 @@ SHAPES = {
     "repo": 'expected a path inside a git work tree; e.g. "." or "/home/me/shop"',
     "base": 'expected a commit-ish in repo (default "HEAD"); e.g. "HEAD" or "a1d03c2"',
     "keep": 'expected a list of repo-relative globs; e.g. ["tests/test_cart.py", "tests/**"]',
+    "blind": 'expected K, the number of blind mutants to draft for a claim with no diff; e.g. 5',
 }
 
 
@@ -164,9 +219,10 @@ def _norm_check(c, field="check"):
 
 
 class Store:
-    def __init__(self, root):
-        self.root = os.path.abspath(root)
-        for d in ("records", "results"):
+    def __init__(self, root, drafter=None):
+        """drafter(claim, files) -> [{path, old, new}, ...]: the blind mutant author (falsify.draft.make_drafter), or None."""
+        self.root, self.drafter = os.path.abspath(root), drafter
+        for d in ("records", "results", "seeds"):
             os.makedirs(os.path.join(self.root, d), exist_ok=True)
 
     def _path(self, kind, h):
@@ -197,7 +253,7 @@ class Store:
         return json.loads(b), None
 
     # ---- register ----
-    def register(self, claim, repo, check, base="HEAD", note="", sanity=None, keep=()):
+    def register(self, claim, repo, check, base="HEAD", note="", sanity=None, keep=(), blind=0):
         if not isinstance(claim, str) or not claim.strip():
             raise refused("claim", "claim must be a non-empty string")
         if not isinstance(repo, str) or not repo.strip():
@@ -219,6 +275,26 @@ class Store:
             if not isinstance(keep, (list, tuple)) or not all(isinstance(k, str) and k and not k.startswith(("/", ":")) for k in keep):
                 raise refused("keep", "keep must be a list of repo-relative globs")
             rec["keep"] = sorted(set(keep))
+        if blind:
+            if not isinstance(blind, int) or isinstance(blind, bool) or not 1 <= blind <= 20:
+                raise refused("blind", "blind must be an int from 1 to 20 (K mutants to draft)")
+            if self.drafter is None:
+                raise Refused("blind: this store has no drafter (falsify.draft.make_drafter; the plugin reads FALSIFY_DRAFT_URL)")
+            files = base_files(top, b)
+            try:
+                drafted = list(self.drafter(claim, files) or [])[:blind]
+            except Exception as e:   # a drafter that fails drafts nothing; the claim stays registrable
+                drafted, rec["blind_error"] = [], f"{type(e).__name__}: {e}"[:300]
+            kept = []
+            for m in map(lambda m: _blind_ok(m, files), drafted):
+                if m and m not in kept:
+                    kept.append(m)
+            seed = secrets.token_hex(32)
+            rec["blind"] = {"asked": blind, "drafted": len(drafted), "mutants": kept, "seed_commit": sha(seed.encode())}
+            p = os.path.join(self.root, "seeds", rec["blind"]["seed_commit"])
+            if not os.path.exists(p):
+                with open(p, "x") as f:
+                    f.write(seed)
         h = self._write_once("records", rec)
         self._log({"event": "register", "record": h, "claim": claim})
         return h
@@ -240,13 +316,17 @@ class Store:
         except Refused as e:
             return self._result(rid, rec["claim"], "void", f"not run: {e}")
         ev = {"final_tree": F, "diff_sha256": sha(diff), "kept_paths_changed": kept}
-        if not diff:
+        bl = rec.get("blind")
+        if not diff and not (bl and bl["mutants"]):
             return self._result(rid, rec["claim"], "void", "no mutant: the tree has no change since the base"
-                                + (" outside the kept paths" if kept else ""), **ev)
+                                + (" outside the kept paths" if kept else "")
+                                + (f", and no blind mutant survived drafting ({bl['drafted']} drafted)" if bl else ""), **ev)
         san = rec.get("sanity")
         for kind, c in (("check", chk),) + ((("sanity", san),) if san else ()):
             if approve(kind, list(c["argv"]), os.path.join(rec["repo"], c["cwd"]), rid) is not True:
                 return self._result(rid, rec["claim"], "void", f"not run: the {kind} was not approved", **ev)
+        if not diff:
+            return self._judge_blind(rid, rec, chk, san, ev)
         units = hunks(diff)
         ev["hunks_total"] = len(units)
         with tempfile.TemporaryDirectory(prefix="falsify-") as tmp:
@@ -263,12 +343,12 @@ class Store:
                 return self._result(rid, rec["claim"], "void", "the check timed out on the final tree: no reading", **ev)
             if not c["passed"]:
                 return self._result(rid, rec["claim"], "disproved", "the check FAILS on your final tree", **ev)
-            r, ev["reverted_run"] = self._mutant(chk, san, rec["repo"], tmp, "reverted", diff)
+            r, ev["reverted_run"] = self._mutant(chk, san, rec["repo"], tmp, "reverted", lambda d: revert(d, diff))
             if r != "killed":
                 return self._result(rid, rec["claim"], "void", r, **ev)
             cover = []
             for i, (path, patch) in enumerate(units[:max_hunks]):
-                v, run = self._mutant(chk, san, rec["repo"], tmp, f"hunk{i}", patch)
+                v, run = self._mutant(chk, san, rec["repo"], tmp, f"hunk{i}", lambda d, p=patch: revert(d, p))
                 cover.append({"path": path, "patch_sha256": sha(patch), "outcome": v, "run": run})
         k = sum(x["outcome"] == "killed" for x in cover)
         un = sum(x["outcome"].startswith("unrevertable") for x in cover)
@@ -277,12 +357,44 @@ class Store:
             f"; {un} hunk(s) unrevertable alone" if un else "")
         return self._result(rid, rec["claim"], "proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
 
-    def _mutant(self, chk, san, repo, tmp, name, patch):
-        """-> (outcome, run): killed, or the VOID reason. Only an rc in the pinned kill_rc is a kill."""
+    def _judge_blind(self, rid, rec, chk, san, ev):
+        """no diff: reveal the seed, draw ONE pre-registered blind mutant, and judge the check against it."""
+        bl, K = rec["blind"], len(rec["blind"]["mutants"])
+        p = os.path.join(self.root, "seeds", bl["seed_commit"])
+        seed = read_bytes(p).decode() if os.path.exists(p) else None
+        if seed is None or sha(seed.encode()) != bl["seed_commit"]:
+            return self._result(rid, rec["claim"], "void", "the blind draw's seed is missing or does not match its commit", **ev)
+        j = draw_index(seed, rid, K)
+        ev.update(blind_seed=seed, blind_drawn=j, blind_k=K, blind_mutant_sha256=sha(canon(bl["mutants"][j])))
+        with tempfile.TemporaryDirectory(prefix="falsify-") as tmp:
+            fin = os.path.join(tmp, "final")
+            copy_tree(rec["repo"], fin)
+            if san:
+                s = run_check(san, fin)
+                ev["final_sanity_run"] = s
+                if not s["passed"]:
+                    return self._result(rid, rec["claim"], "void", "the sanity check fails on your final tree: no reading", **ev)
+            c = run_check(chk, fin)
+            ev["final_run"] = c
+            if c["timed_out"]:
+                return self._result(rid, rec["claim"], "void", "the check timed out on the final tree: no reading", **ev)
+            if not c["passed"]:
+                return self._result(rid, rec["claim"], "disproved", "the check FAILS on your final tree", **ev)
+            r, ev["blind_run"] = self._mutant(chk, san, rec["repo"], tmp, "blind", lambda d: apply_blind(d, bl["mutants"][j]))
+        if r != "killed":
+            return self._result(rid, rec["claim"], "void", r.replace("the revert does not apply", "the drawn blind mutant does not apply")
+                                .replace("your check passes without your change", "your check passes on the drawn blind mutant")
+                                .replace("reverted tree", "mutated tree"), **ev)
+        return self._result(rid, rec["claim"], "proved", f"no diff: the check passes on your tree and kills blind mutant {j} "
+                            f"of {K} (drafted from the claim's words, drawn after the run by the committed seed)", **ev)
+
+    def _mutant(self, chk, san, repo, tmp, name, mutate):
+        """-> (outcome, run): killed, or the VOID reason. mutate(dir) -> None or why it did not apply. Only an rc in
+        the pinned kill_rc is a kill."""
         d = os.path.join(tmp, name)
         copy_tree(repo, d)
         try:
-            err = revert(d, patch)
+            err = mutate(d)
             if err:
                 return f"unrevertable: the revert does not apply ({err})", None
             if san:
@@ -442,7 +554,7 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="falsify", description=__doc__.split("\n")[0])
     ap.add_argument("--store", default=os.environ.get("FALSIFY_STORE", ".falsify"))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("register", help="register BEFORE the work: a JSON file {claim, repo, check, base?, note?, sanity?, keep?}")
+    r = sub.add_parser("register", help="register BEFORE the work: a JSON file {claim, repo, check, base?, note?, sanity?, keep?, blind?}")
     r.add_argument("file")
     j = sub.add_parser("judge", help="judge a registered record by its sha, AFTER the work")
     j.add_argument("record")
@@ -456,8 +568,14 @@ def main(argv):
     try:
         if a.cmd == "register":
             spec = json.loads(read_bytes(a.file))
+            if spec.get("blind"):
+                try:
+                    from . import draft
+                except ImportError:   # run as a script, not as the package
+                    import draft
+                S.drafter = draft.from_env()
             print(S.register(spec["claim"], spec["repo"], spec["check"], spec.get("base", "HEAD"), spec.get("note", ""),
-                             spec.get("sanity"), spec.get("keep", ())))
+                             spec.get("sanity"), spec.get("keep", ()), spec.get("blind", 0)))
         elif a.cmd == "judge":
             yes = a.approve or (sys.stdin.isatty() and input(f"run record {a.record[:12]}'s check on your change and its reverts? [y/N] ").strip().lower() == "y")
             h, res = S.judge(a.record, approve=(lambda *_: True) if yes else None, interactive=a.approve or sys.stdin.isatty())

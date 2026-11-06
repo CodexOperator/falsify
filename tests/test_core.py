@@ -5,6 +5,7 @@ import contextlib, io, json, os, subprocess, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from falsify import adapter as A  # noqa: E402
 from falsify import core as F  # noqa: E402
+from falsify import draft as D  # noqa: E402
 
 PY = sys.executable
 YES = lambda *a: True
@@ -39,8 +40,8 @@ class Base(unittest.TestCase):
         with open(os.path.join(self.repo, name), "w") as f:
             f.write(text)
 
-    def reg(self, script="test_add.py", claim="add works", **chk):
-        return self.S.register(claim, self.repo, {"argv": [PY, script], **chk})
+    def reg(self, script="test_add.py", claim="add works", blind=0, **chk):
+        return self.S.register(claim, self.repo, {"argv": [PY, script], **chk}, blind=blind)
 
     def judge(self, rid, **kw):
         return self.S.judge(rid, approve=YES, **kw)
@@ -383,6 +384,101 @@ class Adapter(Base):
         self.assertIn("['x']", asked[0])
         self.assertFalse(A.make_approver(lambda p: None)("check", ["x"], None, "a" * 64))
 
+
+SUB = {"path": "subject.py", "old": "return a + b", "new": "return a - b"}
+MUL = {"path": "subject.py", "old": "return a + b", "new": "return a * b"}
+
+
+class Blind(Base):
+    """step 4: a claim with NO diff is judged against ONE blind mutant, drafted from the claim's words at register and
+    drawn after the run by a committed seed."""
+    def setUp(self):
+        super().setUp()
+        self.write("subject.py", FIXED)   # the claim is that add ALREADY works: the agent changes nothing
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qam", "fixed")
+        self.seen = []
+        self.S.drafter = lambda claim, files: self.seen.append((claim, files)) or [SUB, MUL, {"path": "subject.py", "old": "nope", "new": "x"}, SUB]
+
+    def test_a_no_diff_claim_is_proved_against_its_drawn_blind_mutant(self):
+        rid = self.reg(blind=4)
+        bl = self.S.load("records", rid)[0]["blind"]
+        self.assertEqual((bl["asked"], bl["drafted"], bl["mutants"]), (4, 4, [SUB, MUL]))   # invalid and duplicate dropped
+        h, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+        ev = r["evidence"]
+        self.assertEqual(F.sha(ev["blind_seed"].encode()), bl["seed_commit"])
+        self.assertEqual(ev["blind_drawn"], F.draw_index(ev["blind_seed"], rid, 2))
+        self.assertIn(f"kills blind mutant {ev['blind_drawn']} of 2", r["why"])
+        self.assertIn("DONE", self.S.done("add works", h) + "DONE")
+
+    def test_a_tautological_check_reads_void_on_the_drawn_mutant(self):
+        _, r = self.judge(self.reg("test_taut.py", blind=4))
+        self.assertEqual(r["verdict"], "void")
+        self.assertEqual(r["why"], "your check passes on the drawn blind mutant")
+
+    def test_the_drafter_reads_the_claim_and_base_files_never_the_check(self):
+        self.reg("test_add.py", claim="add works", blind=2, expect_rc=0)
+        ((claim, files),) = self.seen
+        self.assertEqual(claim, "add works")
+        self.assertEqual(files["subject.py"], FIXED)
+        self.assertNotIn(PY, json.dumps(files))
+
+    def test_a_moved_seed_voids_the_draw(self):
+        rid = self.reg(blind=2)
+        bl = self.S.load("records", rid)[0]["blind"]
+        with open(os.path.join(self.S.root, "seeds", bl["seed_commit"]), "w") as f:
+            f.write("0" * 64)
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("seed is missing or does not match", r["why"])
+
+    def test_no_drafter_refuses_and_a_failing_drafter_drafts_nothing(self):
+        self.S.drafter = None
+        with self.assertRaises(F.Refused):
+            self.reg(blind=2)
+        self.S.drafter = lambda c, f: 1 / 0
+        rid = self.reg(blind=2)
+        self.assertIn("ZeroDivisionError", self.S.load("records", rid)[0]["blind_error"])
+        _, r = self.judge(rid)
+        self.assertIn("no blind mutant survived drafting (0 drafted)", r["why"])
+
+    def test_a_diff_still_uses_the_derived_mutant(self):
+        rid = self.reg(blind=2)
+        self.write("subject.py", BOTH)
+        _, r = self.judge(rid)
+        self.assertEqual(r["why"], "your check passes without your change")   # the REVERT judged it, not a blind draw
+        self.assertIn("reverted_run", r["evidence"])
+        self.assertNotIn("blind_drawn", r["evidence"])
+
+    def test_apply_blind_reports_why_it_does_not_apply(self):
+        d = os.path.join(self.tmp.name, "copy")
+        F.copy_tree(self.repo, d)
+        self.assertIsNone(F.apply_blind(d, SUB))
+        self.assertIn("occurs 0 times", F.apply_blind(d, SUB))
+        self.assertIn("not a file", F.apply_blind(d, {"path": "../x", "old": "a", "new": "b"}))
+
+
+class Draft(unittest.TestCase):
+    def test_parse_skips_think_and_fences_and_takes_the_last_mutants_object(self):
+        text = '<think>{"mutants": [1]}</think>Sure.\n```json\n{"mutants": [{"path": "a", "old": "x", "new": "y"}]}\n```'
+        self.assertEqual(D.parse(text), [{"path": "a", "old": "x", "new": "y"}])
+        self.assertEqual(D.parse("no json here"), [])
+
+    def test_the_drafter_posts_the_claim_and_files_only(self):
+        sent = []
+        post = lambda u, payload, h, t: sent.append((u, payload)) or {"choices": [{"message": {"content": '{"mutants": [{"path": "f.py", "old": "1", "new": "2"}]}'}}]}
+        dr = D.make_drafter("http://127.0.0.1:9/v1/", "m", k=3, post=post)
+        self.assertEqual(dr("X is 1", {"f.py": "X = 1\n"}), [{"path": "f.py", "old": "1", "new": "2"}])
+        ((u, payload),) = sent
+        self.assertEqual(u, "http://127.0.0.1:9/v1/chat/completions")
+        msg = payload["messages"][0]["content"]
+        self.assertIn("CLAIM: X is 1", msg)
+        self.assertIn("=== f.py ===\nX = 1", msg)
+        self.assertIn("Write 3 MUTANTS", msg)
+
+    def test_from_env_needs_a_url(self):
+        self.assertIsNone(D.from_env({}))
+        self.assertTrue(callable(D.from_env({"FALSIFY_DRAFT_URL": "http://127.0.0.1:9/v1"})))
 
 class Done(Base):
     def proved(self):

@@ -28,8 +28,20 @@ passes without the change reads VOID instead of green.
 | disproved | the check fails on the final tree (a full result, not an error) |
 | VOID "your check passes without your change" | the check passes with the whole change reverted: it could not have failed |
 | VOID "unrevertable" | a revert that does not apply, a reverted tree that fails the pre-registered `sanity` argv, or a check that dies with an exit code outside `kill_rc` (pytest 2-5) or times out: never counted as a kill |
-| VOID "no mutant" | there is no change since the base (or only in `keep` paths). A claim with no diff (docs, config) has no derived mutant, and v2 does not draft one: it reads VOID. |
+| proved (blind) | NO diff, and the claim was registered with `blind: K`: the check passes on the final tree and fails on the ONE blind mutant drawn after the run (below) |
+| VOID "your check passes on the drawn blind mutant" | no diff, and the check passes with the drawn blind mutant applied |
+| VOID "no mutant" | there is no change since the base (or only in `keep` paths), and no blind mutant was registered (or none survived drafting) |
 | VOID "not run" | no approver, a "no", or a non-interactive caller (cron, gateway); nothing executed |
+
+**Blind mutants, for a claim with no diff** (plasma's form; docs, config, "it already works"): `register(..., blind=K)`
+asks a separate model, the DRAFTER (`falsify/draft.py`, any OpenAI-compatible endpoint: `FALSIFY_DRAFT_URL`,
+`FALSIFY_DRAFT_MODEL`), for K edits that would make the claim false. It reads the claim's words and the base tree's
+files, never the check. Each edit is `{path, old, new}` (one exact occurrence). The valid ones are hashed into the record
+with the sha256 of a fresh seed. At judge, with no diff, the seed must hash to its commit, and mutant
+`sha256(seed + record sha) mod K` is drawn. The agent never writes, sees in advance, or picks the mutant it is judged
+against. Without a drafter, `blind` is refused; with a diff, the derived mutant wins and the blind ones are not used.
+Not proved: that the drafter's mutants are the ones that matter. A weak drafter makes a weak judge, and the record
+keeps `asked` / `drafted` / kept so that is visible.
 
 `keep` (pre-registered globs, e.g. `tests/**`) leaves those paths' changes in place on every revert, so reverting the
 change never "kills" the check by deleting the check's own new test.
