@@ -1,6 +1,6 @@
 <!-- DRAFT, private (thought-master 16:00Z 11-06, package item 6). Drafted by director-thought-1; director-thought-review
-     audits each line against the bytes. "main" = /fast/falsify main a9b5929. A test cited by name lives in tests/
-     at that sha and passed on a fresh clone (79 passed). A transcript path is a recorded run on /fast, NOT in git. -->
+     audits each line against the bytes. "main" = /fast/falsify main 8872228 (later commits touch submission/ only). A test cited by name lives in
+     tests/ there and passed on a fresh clone. A transcript path is a recorded run on /fast, NOT in git. -->
 # falsify: what is proved, what is not
 
 ## Proved (each line names the run that shows it)
@@ -21,7 +21,7 @@
 | Committing first does not dodge the derived mutant (within one session) | test_a_commit_first_dodge_is_judged_from_the_earlier_base, test_widening_never_crosses_into_an_older_session |
 | Stale bytecode cannot fake a pass on a reverted tree (the bug the suite's positive control found) | test_a_same_size_moved_line_fix_with_an_honest_check_reads_proved; goal:g5.53 M-GOLD a08 (director-thought-science) |
 | Under Hermes, the drafter's URL and key come only through Hermes's secret scope | test_the_drafter_key_comes_from_hermes_secret_scope_never_os_environ |
-| The plugin passes Hermes's own checks | `hermes plugins validate`: "Validation passed." (15 checks; reported 15:16Z 11-06); catalog validator OK on a fill.py-rendered copy |
+| The plugin passes Hermes's own checks | `hermes plugins validate`: "Validation passed." (15 checks, on a fresh clone of main 8872228); catalog validator OK on a fill.py-rendered copy |
 | Hermes + Haiku, UNHINTED task: the agent registered a claim, a human allowed the judge once, the verdict was proved | /fast/director-thought-goals/session/transcript10.txt ("The claim is registered and judged proved. It is recorded as open, not marked done.") |
 | Hermes + local Qwen3-4B, HINTED task (the prompt named the falsify calls): register, judge, proved | /fast/director-thought-goals/session/transcript8.txt |
 | SOLVED coding claims per dollar across models | [PENDING: goal:g5.52 result node, director-thought-science] |
