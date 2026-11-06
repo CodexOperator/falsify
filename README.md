@@ -42,8 +42,9 @@ this change, not that the code is correct, that the check tests the right proper
 
 - `falsify/core.py`: register / judge / done / audit / ledger, and the CLI (`python -m falsify --help`). Pure stdlib + git.
 - `falsify/adapter.py`: the seam a host agent uses: `make_pre_verify(store)` (a `pre_verify` callback returning
-  `{"action": "continue", "message"}` while any claim is not done on a proved result, else `None`), `make_approver(ask)`
-  (wraps the host's yes/no approval route), `nudge_message(store)`.
+  `{"action": "continue", "message"}` while any claim is not done on a proved result, or while the turn's
+  `changed_paths` include a path no open claim's repo contains, else `None`), `make_approver(ask)` (wraps the host's
+  yes/no approval route), `nudge_message(store, changed_paths=())`, `uncovered(store, changed_paths)`.
 - `hermes_plugin/`, `plugin.yaml`, `__init__.py`: the Hermes layer (rooted at the repo).
 - `demo/`: the hackathon story (`python demo/run_demo.py`; needs pytest).
 - `tests/`: `python3 -m unittest discover -s tests` (stdlib unittest; includes a planted tautological check that must

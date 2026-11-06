@@ -18,3 +18,5 @@ A claim ("the bug is fixed", "the test covers X") is not done until it survives 
    hunks the check covers), `disproved` (the check fails on your change), or `void` (the check passes without your
    change, there is no change, or it was not run). Only `proved` may be marked done with `falsify_done`.
 4. Never edit a record to make it pass: an edit is a new record with a new sha.
+5. If you changed files and no open claim covers them, falsify will say so before you finish: register a check that
+   fails without your change, or say plainly that the change is unverified.

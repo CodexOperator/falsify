@@ -339,6 +339,25 @@ class Adapter(Base):
         self.S.done("add works", h)
         self.assertIsNone(hook(attempt=0))
 
+    def test_a_change_no_open_claim_covers_is_nudged(self):
+        hook = A.make_pre_verify(self.S)
+        out = hook(attempt=0, changed_paths=[os.path.join(self.repo, "subject.py")])
+        self.assertIsNotNone(out, "a turn that changed files with no claim must be nudged")
+        self.assertEqual(out["action"], "continue")
+        self.assertIn("with no falsify claim: register a check that fails without your change", out["message"])
+        self.assertIn("subject.py", out["message"])
+        self.assertIsNone(hook(attempt=1, changed_paths=[os.path.join(self.repo, "subject.py")]))
+
+    def test_an_open_claim_covers_its_repo_and_a_done_one_does_not(self):
+        rid = self.reg()
+        inside, outside = os.path.join(self.repo, "subject.py"), os.path.join(self.tmp.name, "elsewhere.py")
+        self.assertEqual(A.uncovered(self.S, [inside, outside]), [outside])
+        self.assertEqual(A.uncovered(self.S, ["subject.py"], cwd=self.repo), [])
+        self.assertNotIn("no falsify claim", A.nudge_message(self.S, changed_paths=[inside]))
+        self.write("subject.py", FIXED)
+        self.S.done("add works", self.judge(rid)[0])
+        self.assertIn("you changed " + inside + " with no falsify claim", A.nudge_message(self.S, changed_paths=[inside]))
+
     def test_a_void_claim_is_named_in_the_nudge(self):
         self.S.judge(self.reg())
         self.assertIn("void (not run: no approver)", A.nudge_message(self.S))
