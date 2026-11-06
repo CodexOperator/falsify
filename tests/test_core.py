@@ -571,6 +571,22 @@ SWAP_BUG = "def f():\n    x = 1\n    x = 2\n    return x\n"      # returns 2
 SWAP_FIX = "def f():\n    x = 2\n    x = 1\n    return x\n"      # a moved line: same size, returns 1
 
 
+
+class StoreInsideRepo(Base):
+    """the CLI's default store is .falsify in the cwd, i.e. inside the repo: its own files are never the change."""
+    def test_a_store_inside_the_repo_is_not_counted_as_the_change(self):
+        S = F.Store(os.path.join(self.repo, ".falsify"))
+        rid = S.register("add works", self.repo, [PY, "test_add.py"])
+        self.write("subject.py", FIXED)
+        _, r = S.judge(rid, approve=YES)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+        self.assertEqual(r["evidence"]["hunks_total"], 1)
+        self.assertIn("covers 1 of 1 hunks", r["why"])
+
+    def test_an_outside_store_excludes_nothing(self):
+        self.assertEqual(self.S._store_pathspec(self.repo), ())
+        self.assertEqual(F.Store(os.path.join(self.repo, "a", "st"))._store_pathspec(self.repo), (":(exclude,literal)a/st",))
+
 class Bytecode(Base):
     """M-GOLD's bug (g5.53 a08): bytecode copied into a mutant tree can outlive the revert. Here the FIXED code's .pyc
     is unchecked-hash (PEP 552: python loads it without looking at the source), the deterministic form of a copied

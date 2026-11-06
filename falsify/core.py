@@ -91,13 +91,14 @@ def git(repo, *args, env=None, inp=None):
 NEVER_THE_CHANGE = (":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.pyc")   # bytecode a test run leaves behind
 
 
-def final_tree(repo):
+def final_tree(repo, exclude=()):
     """The working tree as a git tree sha, through a PRIVATE index (untracked non-ignored files included, bytecode
-    excluded: running the check in the repo writes __pycache__, which is never the agent's change)."""
+    excluded: running the check in the repo writes __pycache__, which is never the agent's change; so are the extra
+    `exclude` pathspecs, e.g. falsify's own store when it lives inside the repo)."""
     with tempfile.TemporaryDirectory(prefix="falsify-idx-") as t:
         env = {"GIT_INDEX_FILE": os.path.join(t, "index")}
         git(repo, "read-tree", "--empty", env=env)
-        git(repo, "add", "-A", "--", ".", *NEVER_THE_CHANGE, env=env)
+        git(repo, "add", "-A", "--", ".", *NEVER_THE_CHANGE, *exclude, env=env)
         return git(repo, "write-tree", env=env).decode().strip()
 
 
@@ -421,7 +422,7 @@ class Store:
             return self._result(rid, rec["claim"], "void", "not run: no approver")
         chk = rec["check"]
         try:
-            F = final_tree(rec["repo"])
+            F = final_tree(rec["repo"], self._store_pathspec(rec["repo"]))
             diff = change(rec["repo"], rec["base_tree"], F, rec.get("keep", ()))
             kept = change(rec["repo"], rec["base_tree"], F) != diff if rec.get("keep") else False
         except Refused as e:
@@ -481,6 +482,12 @@ class Store:
         more = (f" ({len(units) - len(cover)} beyond the cap not measured)" if len(units) > len(cover) else "") + (
             f"; {un} hunk(s) unrevertable alone" if un else "")
         return R("proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
+
+    def _store_pathspec(self, repo):
+        """the store itself is never the agent's change: when it lives inside repo (the CLI default, .falsify in the
+        cwd), exclude its directory from the final tree."""
+        rel = os.path.relpath(os.path.realpath(self.root), os.path.realpath(repo))
+        return () if rel == ".." or rel.startswith(".." + os.sep) else (f":(exclude,literal){rel}",)
 
     def _earliest_ancestor(self, rid, rec):
         """-> (record sha, record) of the EARLIEST registration in this store's ledger from the SAME SESSION as rid's
@@ -726,7 +733,7 @@ def main(argv):
         elif a.cmd == "judge":
             yes = a.approve or (sys.stdin.isatty() and input(f"run record {a.record[:12]}'s check on your change and its reverts? [y/N] ").strip().lower() == "y")
             h, res = S.judge(a.record, approve=(lambda *_: True) if yes else None, interactive=a.approve or sys.stdin.isatty())
-            why = res["why"] + (f"; now run: falsify done {json.dumps(res['claim'])} {h}  to close this claim" if res["verdict"] == "proved" else "")
+            why = res["why"] + (f"; now run: python -m falsify done {json.dumps(res['claim'])} {h}  to close this claim" if res["verdict"] == "proved" else "")
             print(json.dumps({"result": h, "verdict": res["verdict"], "why": why}))
             return {"proved": 0, "disproved": 1}.get(res["verdict"], 2)
         elif a.cmd == "done":
