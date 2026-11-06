@@ -158,6 +158,8 @@ def main(argv):
         a = L["attempt_verdicts"]
         print(f"   ledger: {L['registrations']} registrations over {L['attempts']} attempts: {a['disproved']} disproved, "
               f"{a['void']} void, {a['proved']} proved")
+        L["tally"] = S3.tally(claim)
+        print(f"   falsify ledger (hash-chained): {L['tally']}")
         out["ledger"] = L
     out["wall_s"] = round(time.time() - t0, 2)
     print(f"== {out['wall_s']} s")

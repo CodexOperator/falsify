@@ -16,4 +16,6 @@ def test_the_demo_story():
     assert [r["verdict"] for r in out["retry"]] == ["disproved", "void", "proved"]
     assert [r["receipt_green"] for r in out["retry"]] == [False, True, True]
     assert out["ledger"]["registrations"] == 3 and out["ledger"]["attempts"] == 3
+    assert "3 registration(s), verdicts 1 proved / 1 disproved / 1 void" in out["ledger"]["tally"]
+    assert "RE-REGISTERED after a disproved or VOID verdict" in out["ledger"]["tally"]
     assert out["wall_s"] < 90

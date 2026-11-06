@@ -17,6 +17,10 @@ v2: the mutant is DERIVED from the agent's own change, never written by the agen
               no change (B == F)                           -> VOID "no mutant"
               otherwise                                    -> proved, with k of h
             The result is written content-addressed too (results/<sha>.json), naming the record's sha.
+  ledger    ledger.jsonl: an APPEND-ONLY, hash-chained log of every register and every judge (each line names the
+            sha256 of the line before it); audit() walks the chain, and done reports the claim's whole history:
+            "this claim: N registrations, verdicts p / d / v; session total M", flagging a claim re-registered
+            after a disproved or VOID verdict (retry-until-green is visible, not hidden behind the last green).
   done      a claim is DONE only on a RESOLVABLE result: result and record both exist and hash to their names, the
             result names that record and claim, and the verdict is proved; else refused with the reason.
 
@@ -31,11 +35,12 @@ the check by deleting the check's own new test (a trivial kill); those hunks are
 Temp copies exclude `.git` (the check runs on files, not history) and include ignored files (a venv, build outputs),
 so both trees differ ONLY by the change.
 """
-import hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+import fcntl, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
 DEFAULT_TIMEOUT_S = 60
 OUT_CAP = 4096
 MAX_HUNKS = 50
+GENESIS = "0" * 64
 
 
 class Refused(Exception):
@@ -183,7 +188,9 @@ class Store:
             if not isinstance(keep, (list, tuple)) or not all(isinstance(k, str) and k and not k.startswith(("/", ":")) for k in keep):
                 raise Refused("keep must be a list of repo-relative globs")
             rec["keep"] = sorted(set(keep))
-        return self._write_once("records", rec)
+        h = self._write_once("records", rec)
+        self._log({"event": "register", "record": h, "claim": claim})
+        return h
 
     # ---- judge ----
     def judge(self, rid, approve=None, interactive=True, max_hunks=MAX_HUNKS):
@@ -264,7 +271,68 @@ class Store:
 
     def _result(self, rid, claim, verdict, why, **ev):
         res = {"record": rid, "claim": claim, "verdict": verdict, "why": why, "evidence": ev, "judged_at": now()}
-        return self._write_once("results", res), res
+        h = self._write_once("results", res)
+        self._log({"event": "judge", "record": rid, "claim": claim, "result": h, "verdict": verdict})
+        return h, res
+
+    # ---- the ledger ----
+    def _ledger_path(self):
+        return os.path.join(self.root, "ledger.jsonl")
+
+    def _log(self, entry):
+        """append one hash-chained line under an exclusive lock: {seq, prev, at, ...entry}."""
+        p = self._ledger_path()
+        with open(p, "a+b") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
+            lines = f.read().splitlines()
+            prev = sha(lines[-1]) if lines else GENESIS
+            f.write(canon({**entry, "seq": len(lines), "prev": prev, "at": now()}) + b"\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+    def ledger(self):
+        """-> (entries, problems): every line parsed; problems names each break in the chain (an edit, a removal, a
+        reorder or an insertion before the tip all break it)."""
+        p = self._ledger_path()
+        lines = read_bytes(p).splitlines() if os.path.exists(p) else []
+        out, bad, prev = [], [], GENESIS
+        for i, ln in enumerate(lines):
+            try:
+                e = json.loads(ln)
+            except ValueError:
+                bad.append(f"ledger line {i} does not parse")
+                prev = sha(ln)
+                continue
+            if e.get("prev") != prev or e.get("seq") != i:
+                bad.append(f"ledger line {i} breaks the chain (seq {e.get('seq')}, prev {str(e.get('prev'))[:12]} != {prev[:12]})")
+            out.append(e)
+            prev = sha(ln)
+        return out, bad
+
+    def tally(self, claim):
+        """the denominator: this claim's registrations and verdicts, the store's totals, and any retry after a loss."""
+        es, bad = self.ledger()
+        regs = [e for e in es if e.get("event") == "register" and e.get("claim") == claim]
+        js = [e for e in es if e.get("event") == "judge" and e.get("claim") == claim]
+        v = {k: sum(e.get("verdict") == k for e in js) for k in ("proved", "disproved", "void")}
+        lost, retried = set(), False
+        for e in es:
+            if e.get("claim") != claim:
+                continue
+            if e.get("event") == "judge" and e.get("verdict") in ("disproved", "void"):
+                lost.add(e["record"])
+            if e.get("event") == "register" and lost:
+                retried = True
+        total_r = sum(e.get("event") == "register" for e in es)
+        total_j = sum(e.get("event") == "judge" for e in es)
+        s = (f"this claim: {len(regs)} registration(s), verdicts {v['proved']} proved / {v['disproved']} disproved / "
+             f"{v['void']} void; session total {total_r} registration(s), {total_j} judgement(s)")
+        if retried:
+            s += "; RE-REGISTERED after a disproved or VOID verdict"
+        if bad:
+            s += f"; LEDGER BROKEN ({len(bad)} break(s))"
+        return s
 
     # ---- done (the evidence gate) ----
     def done(self, claim, result_id):
@@ -281,7 +349,7 @@ class Store:
         line = canon({"claim": claim, "result": result_id, "record": res["record"]}).decode()
         with open(os.path.join(self.root, "done.jsonl"), "a") as f:
             f.write(line + "\n")
-        return line
+        return line + "\n" + self.tally(claim)
 
     def results_for(self, rid):
         """every resolvable result naming record rid, oldest first."""
@@ -318,6 +386,7 @@ class Store:
             rec, why2 = (self.load("records", d["record"]) if res else (None, why))
             if res is None or rec is None or res["verdict"] != "proved" or res["record"] != d["record"]:
                 bad.append((ln, why or why2 or "verdict or record mismatch"))
+        bad += [("ledger.jsonl", b) for b in self.ledger()[1]]
         return bad
 
 

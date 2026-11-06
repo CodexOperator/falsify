@@ -237,6 +237,53 @@ class KillQuality(Base):
         self.assertIn("the sanity was not approved", r["why"])
 
 
+class Ledger(Base):
+    """Step 3: every register and judge is a hash-chained line; done reports the denominator."""
+    def test_retry_until_green_is_counted_and_flagged(self):
+        a = self.reg()
+        self.write("subject.py", BUGGY.replace("return 0", "return 1", 1))
+        self.judge(a)                                               # disproved
+        b = self.reg("test_taut.py")
+        self.judge(b)                                               # void: passes without the change
+        c = self.reg()
+        self.write("subject.py", FIXED)
+        h, r = self.judge(c)
+        self.assertEqual(r["verdict"], "proved")
+        out = self.S.done("add works", h)
+        self.assertIn("this claim: 3 registration(s), verdicts 1 proved / 1 disproved / 1 void", out)
+        self.assertIn("session total 3 registration(s), 3 judgement(s)", out)
+        self.assertIn("RE-REGISTERED after a disproved or VOID verdict", out)
+
+    def test_a_clean_first_try_is_not_flagged(self):
+        rid = self.reg()
+        self.write("subject.py", FIXED)
+        out = self.S.done("add works", self.judge(rid)[0])
+        self.assertIn("1 registration(s), verdicts 1 proved / 0 disproved / 0 void", out)
+        self.assertNotIn("RE-REGISTERED", out)
+
+    def test_an_edited_or_dropped_ledger_line_breaks_the_chain_and_audit_says_so(self):
+        rid = self.reg()
+        self.judge(rid)
+        self.judge(rid)
+        p = os.path.join(self.S.root, "ledger.jsonl")
+        lines = F.read_bytes(p).splitlines()
+        self.assertEqual(self.S.ledger()[1], [])
+        for broken in ([lines[0].replace(b"add works", b"add WORKS")] + lines[1:], [lines[0]] + lines[2:], lines[1:]):
+            with open(p, "wb") as f:
+                f.write(b"\n".join(broken) + b"\n")
+            bad = self.S.audit()
+            self.assertTrue(any(k == "ledger.jsonl" and "breaks the chain" in w for k, w in bad), bad)
+        with open(p, "wb") as f:
+            f.write(b"\n".join(lines) + b"\n")
+        self.assertEqual(self.S.audit(), [])
+
+    def test_a_judge_that_did_not_run_is_still_logged(self):
+        rid = self.reg()
+        self.S.judge(rid)                                           # no approver
+        es, _ = self.S.ledger()
+        self.assertEqual([(e["event"], e.get("verdict")) for e in es], [("register", None), ("judge", "void")])
+
+
 class Approval(Base):
     """R1: only approved, only the record's argv, never under a non-interactive caller; nothing runs on a refusal."""
     def marker(self):
