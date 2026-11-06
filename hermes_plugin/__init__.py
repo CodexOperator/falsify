@@ -128,7 +128,7 @@ def make_tools(store, grants):
              "keep": {"type": "array", "items": {"type": "string"}}, "blind": {"type": "integer"}},
             ["claim", "repo", "check"]), register),
         ("falsify_judge", schema("falsify_judge",
-            "Judge a registered claim after your change: once a HUMAN approves the exact argv, run the check on your "
+            "Judge a registered claim after your change: once the exact argv is approved at Hermes's approval prompt, run the check on your "
             "final tree (must pass) and with your change reverted, whole and per hunk (must fail). proved (k of h "
             "hunks covered) / disproved / VOID (passes without your change, no change, or not run). Unapproved = "
             "VOID 'not run', nothing runs.",
