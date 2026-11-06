@@ -1,218 +1,256 @@
-"""Tests for falsify.core and falsify.adapter: stdlib unittest, every check a tiny python -c or script in a temp tree."""
-import json, os, sys, tempfile, unittest
+"""Tests for falsify.core and falsify.adapter (v2: the mutant is derived from the agent's own change).
+stdlib unittest; every subject is a tiny git repo in a temp dir, every check a python script in it."""
+import contextlib, io, json, os, subprocess, sys, tempfile, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from falsify import adapter as A  # noqa: E402
 from falsify import core as F  # noqa: E402
 
 PY = sys.executable
-ok = lambda **k: {"argv": [PY, "-c", "pass"], **k}
-bad = lambda **k: {"argv": [PY, "-c", "raise SystemExit(1)"], **k}
-
-SUBJECT = "def add(a, b):\n    return a + b\n"
-TEST = "from subject import add\nassert add(2, 3) == 5\n"
-WEAK = "from subject import add\nassert add(2, 3) is not None\n"   # a check too weak to notice the mutant
-
-
 YES = lambda *a: True
+BUGGY = "def add(a, b):\n    return 0\n" + "\n# padding, so the two functions are separate hunks\n" * 6 + "\ndef sub(a, b):\n    return 0\n"
+FIXED = BUGGY.replace("def add(a, b):\n    return 0", "def add(a, b):\n    return a + b")
+BOTH = FIXED.replace("def sub(a, b):\n    return 0", "def sub(a, b):\n    return a - b")
+TEST_ADD = "from subject import add\nassert add(2, 3) == 5\n"
+TAUT = "assert True\n"
 
 
-class Store(F.Store):
-    def judge_yes(self, rid):
-        return self.judge(rid, approve=YES)
+def sh(cwd, *a):
+    subprocess.run(a, cwd=cwd, check=True, capture_output=True)
 
 
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.S = Store(os.path.join(self.tmp.name, "store"))
-        self.tree = os.path.join(self.tmp.name, "tree")
-        os.makedirs(self.tree)
-        for n, t in (("subject.py", SUBJECT), ("test_ok.py", TEST), ("test_weak.py", WEAK)):
-            open(os.path.join(self.tree, n), "w").write(t)
+        self.S = F.Store(os.path.join(self.tmp.name, "store"))
+        self.repo = os.path.join(self.tmp.name, "repo")
+        os.makedirs(self.repo)
+        self.write("subject.py", BUGGY)
+        self.write("test_add.py", TEST_ADD)
+        self.write("test_taut.py", TAUT)
+        sh(self.repo, "git", "init", "-q")
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "base")
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def check(self, script):
-        return {"argv": [PY, script], "cwd": self.tree}
+    def write(self, name, text):
+        with open(os.path.join(self.repo, name), "w") as f:
+            f.write(text)
 
-    def mutant(self, script, new="return a - b"):
-        return {"argv": [PY, script], "cwd": self.tree, "patch": {"path": "subject.py", "old": "return a + b", "new": new}}
+    def reg(self, script="test_add.py", claim="add works", **chk):
+        return self.S.register(claim, self.repo, {"argv": [PY, script], **chk})
+
+    def judge(self, rid, **kw):
+        return self.S.judge(rid, approve=YES, **kw)
 
 
 class Register(Base):
-    def test_hash_is_content_and_rewrite_is_refused(self):
-        h = self.S.register("add works", ok(), bad())
-        p = os.path.join(self.S.root, "records", h + ".json")
-        self.assertEqual(F.sha(open(p, "rb").read()), h)
-        rec = json.loads(open(p, "rb").read())
-        open(p, "wb").write(F.canon({**rec, "claim": "edited"}))       # someone rewrites the file in place
+    def test_the_record_pins_the_base_and_is_content_addressed(self):
+        rid = self.reg()
+        rec, why = self.S.load("records", rid)
+        self.assertIsNone(why)
+        head = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        self.assertEqual((rec["base"], rec["check"]["cwd"]), (head, "."))
+        p = os.path.join(self.S.root, "records", rid + ".json")
+        with open(p, "wb") as f:
+            f.write(F.canon({**rec, "claim": "edited"}))            # an edit after registration
+        self.assertIn("MOVED", self.S.load("records", rid)[1])
         with self.assertRaises(F.Refused):
-            self.S._write_once("records", rec)                          # re-writing the original bytes is refused
-        self.assertIn("MOVED", self.S.load("records", h)[1])
+            self.S._write_once("records", rec)                     # and the original bytes can't be re-written over it
 
     def test_bad_specs_are_refused(self):
-        for c, m in ((ok(argv=[]), bad()), (ok(), {"argv": "true"}), (ok(patch={"path": "a", "old": "x", "new": "y"}), bad()),
-                     (ok(), bad(patch={"path": "a", "old": "x", "new": "x"}))):
+        for chk in ({"argv": []}, {"argv": "x"}, {"argv": ["x"], "cwd": "/etc"}, {"argv": ["x"], "cwd": "../up"}):
             with self.assertRaises(F.Refused):
-                self.S.register("c", c, m)
+                self.S.register("c", self.repo, chk)
         with self.assertRaises(F.Refused):
-            self.S.register("  ", ok(), bad())
+            self.S.register(" ", self.repo, {"argv": ["x"]})
+        with self.assertRaises(F.Refused):
+            self.S.register("c", self.tmp.name, {"argv": ["x"]})   # not a git repo
+        with self.assertRaises(F.Refused):
+            self.S.register("c", self.repo, {"argv": ["x"]}, base="no-such-ref")
 
 
 class Judge(Base):
-    def test_a_real_check_with_a_killing_mutant_is_proved(self):
-        h, r = self.S.judge_yes(self.S.register("add works", self.check("test_ok.py"), self.mutant("test_ok.py")))
+    def test_a_check_that_needs_the_change_is_proved_with_its_hunk_coverage(self):
+        rid = self.reg()
+        self.write("subject.py", FIXED)
+        _, r = self.judge(rid)
         self.assertEqual(r["verdict"], "proved", r["why"])
-        self.assertFalse(r["mutant_run"]["passed"])
-        self.assertTrue(r["check_run"]["passed"])
-        self.assertEqual(open(os.path.join(self.tree, "subject.py")).read(), SUBJECT)   # the real tree is untouched
+        self.assertEqual((r["evidence"]["hunks_killed"], r["evidence"]["hunks_total"]), (1, 1))
+        self.assertIn("covers 1 of 1", r["why"])
+        with open(os.path.join(self.repo, "subject.py")) as f:
+            self.assertEqual(f.read(), FIXED)                      # the real tree is untouched
 
-    def test_a_failing_check_is_disproved_not_an_error(self):
-        open(os.path.join(self.tree, "subject.py"), "w").write(SUBJECT.replace("a + b", "a * b"))
-        m = {"argv": [PY, "test_ok.py"], "cwd": self.tree, "patch": {"path": "subject.py", "old": "return a * b", "new": "return 0"}}
-        rid = self.S.register("add works", self.check("test_ok.py"), m)
-        _, r = self.S.judge_yes(rid)
-        self.assertEqual(r["verdict"], "disproved", r["why"])
+    def test_a_check_that_misses_a_hunk_says_k_of_h(self):
+        rid = self.reg()
+        self.write("subject.py", BOTH)
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "proved")
+        self.assertEqual(r["evidence"]["hunks_total"], 2)
+        self.assertEqual(r["evidence"]["hunks_killed"], 1)
+        self.assertEqual([h["outcome"] for h in r["evidence"]["hunks"]], ["killed", "your check passes without your change"])
 
     def test_PLANTED_tautology_reads_void(self):
-        """The planted tautological check: it passes whatever the subject is, so its mutant passes too -> VOID."""
-        taut = {"argv": [PY, "-c", "assert True"], "cwd": self.tree}
-        _, r = self.S.judge_yes(self.S.register("add works", taut, {**taut, "patch": {"path": "subject.py", "old": "return a + b", "new": "return None"}}))
-        self.assertEqual(r["verdict"], "void")
-        self.assertIn("mutant PASSED", r["why"])
+        """The planted tautological check passes with or without the change -> VOID."""
+        rid = self.reg("test_taut.py")
+        self.write("subject.py", FIXED)
+        _, r = self.judge(rid)
+        self.assertEqual((r["verdict"], r["why"]), ("void", "your check passes without your change"))
 
-    def test_a_weak_check_the_mutant_survives_reads_void(self):
-        _, r = self.S.judge_yes(self.S.register("add works", self.check("test_weak.py"), self.mutant("test_weak.py")))
-        self.assertEqual(r["verdict"], "void")
+    def test_a_check_that_fails_on_the_final_tree_is_disproved(self):
+        rid = self.reg()
+        self.write("subject.py", BUGGY.replace("return 0", "return 1", 1))
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "disproved")
 
-    def test_vacuous_by_construction_is_void_before_running(self):
-        _, r = self.S.judge_yes(self.S.register("x", ok(), ok()))
+    def test_no_change_is_void_no_mutant(self):
+        _, r = self.judge(self.reg())
         self.assertEqual(r["verdict"], "void")
-        self.assertIn("by construction", r["why"])
-        self.assertIsNone(r["mutant_run"])
+        self.assertIn("no mutant", r["why"])
+
+    def test_untracked_and_committed_changes_both_count_and_the_users_index_is_untouched(self):
+        rid = self.reg("test_new.py")
+        self.write("newmod.py", "X = 7\n")
+        self.write("test_new.py", "from newmod import X\nassert X == 7\n")
+        sh(self.repo, "git", "add", "test_new.py")
+        before = subprocess.run(["git", "-C", self.repo, "status", "--porcelain"], capture_output=True, text=True).stdout
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "proved", r["why"])
+        self.assertEqual(r["evidence"]["hunks_total"], 2)
+        after = subprocess.run(["git", "-C", self.repo, "status", "--porcelain"], capture_output=True, text=True).stdout
+        self.assertEqual(before, after)
+
+    def test_bytecode_left_by_a_test_run_is_never_part_of_the_change(self):
+        rid = self.reg()
+        self.write("subject.py", FIXED)
+        subprocess.run([PY, "test_add.py"], cwd=self.repo, check=True)   # the agent ran its test in the repo
+        os.makedirs(os.path.join(self.repo, "__pycache__"), exist_ok=True)
+        with open(os.path.join(self.repo, "__pycache__", "stray.cpython-313.pyc"), "wb") as f:
+            f.write(b"\x00bytecode")
+        _, r = self.judge(rid)
+        self.assertEqual((r["verdict"], r["evidence"]["hunks_total"]), ("proved", 1))
+        self.assertTrue([h["path"] for h in r["evidence"]["hunks"]] == ["subject.py"])
+
+    def test_a_timeout_on_the_final_tree_is_void(self):
+        self.write("test_slow.py", "import time\ntime.sleep(5)\n")
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "slow")
+        rid = self.reg("test_slow.py", timeout_s=0.5)
+        self.write("subject.py", FIXED)
+        _, r = self.judge(rid)
+        self.assertEqual(r["verdict"], "void")
+        self.assertIn("timed out", r["why"])
 
     def test_a_moved_record_reads_void(self):
-        rid = self.S.register("add works", self.check("test_ok.py"), self.mutant("test_ok.py"))
+        rid = self.reg()
         p = os.path.join(self.S.root, "records", rid + ".json")
-        rec = json.load(open(p))
-        rec["check"]["argv"] = [PY, "-c", "pass"]   # an edit after registration
-        open(p, "wb").write(F.canon(rec))
-        _, r = self.S.judge_yes(rid)
+        rec = json.loads(F.read_bytes(p))
+        with open(p, "wb") as f:
+            f.write(F.canon({**rec, "check": {**rec["check"], "argv": [PY, "test_taut.py"]}}))
+        _, r = self.judge(rid)
         self.assertEqual(r["verdict"], "void")
         self.assertIn("MOVED", r["why"])
 
-    def test_a_patch_that_does_not_apply_is_void(self):
-        m = {"argv": [PY, "test_ok.py"], "cwd": self.tree, "patch": {"path": "subject.py", "old": "not in the file", "new": "x"}}
-        _, r = self.S.judge_yes(self.S.register("add works", self.check("test_ok.py"), m))
-        self.assertEqual(r["verdict"], "void")
-        self.assertIn("0 times", r["why"])
-
-    def test_a_patch_cannot_leave_the_tree(self):
-        m = {"argv": [PY, "test_ok.py"], "cwd": self.tree, "patch": {"path": "../outside.py", "old": "a", "new": "b"}}
-        _, r = self.S.judge_yes(self.S.register("add works", self.check("test_ok.py"), m))
-        self.assertEqual(r["verdict"], "void")
-
-    def test_a_timeout_is_void(self):
-        slow = {"argv": [PY, "-c", "import time; time.sleep(5)"], "timeout_s": 0.5}
-        _, r = self.S.judge_yes(self.S.register("x", slow, bad()))
-        self.assertEqual(r["verdict"], "void")
-        self.assertIn("timed out", r["why"])
+    def test_hunks_split_per_hunk_and_keep_binary_and_new_files_whole(self):
+        d = (b"diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n@@ -9 +9 @@\n-c\n+d\n"
+             b"diff --git a/y.bin b/y.bin\nindex 1..2\nGIT binary patch\nliteral 1\nIc\n")
+        u = F.hunks(d)
+        self.assertEqual([p for p, _ in u], ["x", "x", "y.bin"])
+        self.assertTrue(all(b.startswith(b"diff --git a/x b/x\nindex 1..2 100644\n--- a/x\n+++ b/x\n@@") for _, b in u[:2]))
 
 
 class Approval(Base):
     """R1: only approved, only the record's argv, never under a non-interactive caller; nothing runs on a refusal."""
-    def marker_record(self):
+    def marker(self):
         m = os.path.join(self.tmp.name, "ran")
-        c = {"argv": [PY, "-c", f"open({m!r}, 'a').write('x')"]}
-        return self.S.register("c", c, bad()), m
+        self.write("test_mark.py", f"open({m!r}, 'a').write('x')\n")
+        sh(self.repo, "git", "add", "-A")
+        sh(self.repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "m")
+        rid = self.reg("test_mark.py")
+        self.write("subject.py", FIXED)
+        return rid, m
 
     def test_no_approver_runs_nothing(self):
-        rid, m = self.marker_record()
+        rid, m = self.marker()
         _, r = self.S.judge(rid)
         self.assertEqual((r["verdict"], r["why"]), ("void", "not run: no approver"))
         self.assertFalse(os.path.exists(m))
 
     def test_non_interactive_runs_nothing_even_if_approved(self):
-        rid, m = self.marker_record()
+        rid, m = self.marker()
         _, r = self.S.judge(rid, approve=YES, interactive=False)
         self.assertEqual(r["verdict"], "void")
-        self.assertIn("non-interactive", r["why"])
+        self.assertIn("not run: a non-interactive caller", r["why"])
         self.assertFalse(os.path.exists(m))
 
-    def test_a_refused_mutant_or_check_runs_nothing(self):
-        for deny in ("mutant", "check"):
-            rid, m = self.marker_record()
-            _, r = self.S.judge(rid, approve=lambda k, *a: k != deny)
-            self.assertIn(f"the {deny} was not approved", r["why"])
+    def test_a_refused_or_non_bool_answer_runs_nothing(self):
+        rid, m = self.marker()
+        for ans in (False, "yes", None):
+            _, r = self.S.judge(rid, approve=lambda *a: ans)
+            self.assertIn("not approved", r["why"])
             self.assertFalse(os.path.exists(m))
 
-    def test_the_approver_sees_exactly_the_records_argv(self):
+    def test_the_approver_sees_exactly_the_records_argv_once(self):
         seen = []
-        rid = self.S.register("add works", self.check("test_ok.py"), self.mutant("test_ok.py"))
+        rid = self.reg()
+        self.write("subject.py", FIXED)
         _, r = self.S.judge(rid, approve=lambda k, argv, cwd, h: seen.append((k, argv, cwd, h)) or True)
         self.assertEqual(r["verdict"], "proved")
-        self.assertEqual(seen, [("mutant", [PY, "test_ok.py"], self.tree, rid), ("check", [PY, "test_ok.py"], self.tree, rid)])
-
-    def test_an_approver_that_returns_truthy_non_bool_is_a_no(self):
-        rid, m = self.marker_record()
-        _, r = self.S.judge(rid, approve=lambda *a: "yes")
-        self.assertIn("not approved", r["why"])
+        self.assertEqual(seen, [("check", [PY, "test_add.py"], os.path.join(os.path.realpath(self.repo), "."), rid)])
 
 
 class Adapter(Base):
     def test_pre_verify_nudges_open_claims_and_goes_quiet_when_done(self):
-        from falsify import adapter as A
         hook = A.make_pre_verify(self.S)
-        self.assertIsNone(hook(attempt=0))                          # nothing registered: finish
-        rid = self.S.register("add works", self.check("test_ok.py"), self.mutant("test_ok.py"))
+        self.assertIsNone(hook(attempt=0))
+        rid = self.reg()
         out = hook(session_id="s", coding=True, attempt=0, final_response="done", changed_paths=["subject.py"])
         self.assertEqual(out["action"], "continue")
         self.assertIn("unjudged", out["message"])
-        self.assertIsNone(hook(attempt=1))                           # self-throttled
-        h, _ = self.S.judge_yes(rid)
-        self.assertIn("proved", hook(attempt=0)["message"])         # proved but not yet DONE: still open
+        self.assertIsNone(hook(attempt=1))
+        self.write("subject.py", FIXED)
+        h, _ = self.judge(rid)
+        self.assertIn("proved", hook(attempt=0)["message"])
         self.S.done("add works", h)
         self.assertIsNone(hook(attempt=0))
 
     def test_a_void_claim_is_named_in_the_nudge(self):
-        from falsify import adapter as A
-        self.S.judge(self.S.register("add works", self.check("test_ok.py"), self.mutant("test_ok.py")))   # no approver
+        self.S.judge(self.reg())
         self.assertIn("void (not run: no approver)", A.nudge_message(self.S))
 
     def test_make_approver_passes_the_hosts_answer(self):
-        from falsify import adapter as A
         asked = []
-        ap = A.make_approver(lambda p: asked.append(p) or True)
-        self.assertTrue(ap("check", ["x"], "/t", "a" * 64))
+        self.assertTrue(A.make_approver(lambda p: asked.append(p) or True)("check", ["x"], "/t", "a" * 64))
         self.assertIn("['x']", asked[0])
         self.assertFalse(A.make_approver(lambda p: None)("check", ["x"], None, "a" * 64))
 
 
 class Done(Base):
-    def proved(self, claim="add works"):
-        return self.S.judge_yes(self.S.register(claim, self.check("test_ok.py"), self.mutant("test_ok.py")))[0]
+    def proved(self):
+        rid = self.reg()
+        self.write("subject.py", FIXED)
+        return self.judge(rid)[0]
 
-    def test_done_on_a_proved_result(self):
-        self.assertIn('"claim":"add works"', self.S.done("add works", self.proved()))
-        self.assertEqual(self.S.audit(), [])
-
-    def test_done_refuses_void_disproved_missing_and_wrong_claim(self):
-        void = self.S.judge_yes(self.S.register("add works", {"argv": [PY, "-c", "pass"], "cwd": self.tree},
-                                            {"argv": [PY, "-c", "pass"], "cwd": self.tree, "patch": {"path": "subject.py", "old": "a + b", "new": "0"}}))[0]
+    def test_done_on_a_proved_result_and_refusals(self):
+        h = self.proved()
+        void = self.judge(self.reg("test_taut.py"))[0]
         for claim, rid, word in (("add works", void, "void"), ("add works", "0" * 64, "does not exist"),
-                                 ("something else", self.proved(), "evidence for"), ("add works", "nothex", "not a sha256")):
+                                 ("something else", h, "evidence for"), ("add works", "nothex", "not a sha256")):
             with self.assertRaises(F.Refused) as e:
                 self.S.done(claim, rid)
             self.assertIn(word, str(e.exception))
+        self.assertIn('"claim":"add works"', self.S.done("add works", h))
+        self.assertEqual(self.S.audit(), [])
 
     def test_audit_demotes_a_done_whose_evidence_moved(self):
-        rid = self.proved()
-        self.S.done("add works", rid)
-        p = os.path.join(self.S.root, "results", rid + ".json")
-        res = json.load(open(p))
-        res["why"] = "edited"
-        open(p, "wb").write(F.canon(res))
+        h = self.proved()
+        self.S.done("add works", h)
+        p = os.path.join(self.S.root, "results", h + ".json")
+        res = json.loads(F.read_bytes(p))
+        with open(p, "wb") as f:
+            f.write(F.canon({**res, "why": "edited"}))
         bad = self.S.audit()
         self.assertEqual(len(bad), 1)
         self.assertIn("MOVED", bad[0][1])
@@ -221,13 +259,14 @@ class Done(Base):
 class Cli(Base):
     def test_register_judge_done_audit(self):
         spec = os.path.join(self.tmp.name, "spec.json")
-        json.dump({"claim": "add works", "check": self.check("test_ok.py"), "mutant": self.mutant("test_ok.py")}, open(spec, "w"))
+        with open(spec, "w") as f:
+            json.dump({"claim": "add works", "repo": self.repo, "check": {"argv": [PY, "test_add.py"]}}, f)
         st = ["--store", self.S.root]
-        import io, contextlib
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(F.main(st + ["register", spec]), 0)
         rid = out.getvalue().strip()
+        self.write("subject.py", FIXED)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(F.main(st + ["judge", rid, "--approve"]), 0)

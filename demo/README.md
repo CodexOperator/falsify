@@ -2,10 +2,10 @@
 
 `python demo/run_demo.py` reproduces the failure every reviewer has seen: an agent's fix "proved" by a test that
 passes with the fix reverted (it mocks the function it fixed). A post-run receipt seals it GREEN; falsify reads it
-VOID, "your check passes without your change". The honest test on the same fix reads PROVED, covering 2 of 2 hunks.
+VOID, "your check passes without your change". The honest test on the same fix reads PROVED, covering every hunk of the fix (git counts the fixture's two adjacent edits as one hunk).
 A retry-until-green run keeps every registration in the ledger.
 
-- Needs: stdlib + pytest. No network, no key. About 11-13 s.
+- Needs: stdlib + pytest. No network, no key. About 20-30 s (v2 runs the check on the final tree, the whole revert, and each hunk).
 - Run with: **Python 3.13.5 + pytest 9.2.0** (a private venv; the system `python3` here has no pytest). `FALSIFY_DEMO_PYTHON` names
   another interpreter for the checks.
 - Pinned: `python -m pytest demo/test_demo.py` (1 test, the whole story).

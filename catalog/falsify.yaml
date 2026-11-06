@@ -4,15 +4,17 @@ repo: https://github.com/OWNER/falsify
 sha: "0000000000000000000000000000000000000000"  # PLACEHOLDER: the pinned commit at submission
 description: >-
   A claim is not done until it survives a check that could have failed. The agent pre-registers each
-  claim (its check and a MUTANT that must fail), hashed before any run; judging runs the mutant and then
-  the check, and a mutant that passes reads VOID (the check was vacuous). A pre_verify nudge names every
-  claim not done on a proved result before the turn finishes; it never blocks completion. Disclosure —
-  falsify RUNS the check and mutant commands the agent registered, with your permissions and no sandbox;
-  for a patched mutant it copies the check's working directory to a temp dir, edits one string there and
-  runs the mutant in the copy (the original tree is read, never written); every run
-  first asks a human through Hermes's approval gate with the exact argv, and under cron, gateway
-  auto-approve or any run where no human answered it records VOID 'not run' and executes nothing. Stores
-  records and results under its own plugin data dir; no network, no credentials, no background process.
+  claim BEFORE changing anything (its check and the base commit), hashed before any run; judging runs the
+  check on the agent's final tree (must pass) and on copies with the agent's own change reverted, whole and
+  hunk by hunk (must fail): a check that passes without the change reads VOID, and a proved claim says how
+  many hunks of the change its check covers. The agent never writes the mutant. A pre_verify nudge names
+  every claim not done on a proved result before the turn finishes; it never blocks completion.
+  Disclosure: falsify RUNS the check command the agent registered, with your permissions and no sandbox,
+  in temporary copies of the repo's working tree (read with a private git index; the original tree, its
+  index and history are never written); every run first asks a human through Hermes's approval gate with
+  the exact argv, and under cron, gateway auto-approve or any run where no human answered it records VOID
+  'not run' and executes nothing. Stores records and results under its own plugin data dir; no network,
+  no credentials, no background process.
 maintainer: OWNER
 tier: community
 category: tools

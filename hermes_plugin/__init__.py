@@ -4,7 +4,7 @@ this package imports falsify.adapter + falsify.Store only and never calls subpro
 Seams (hermes-agent ca43606920, all public; rule 9: nothing wraps or rebinds AIAgent's finish):
 - pre_verify (agent/turn_stop_gates.py:69): falsify.adapter.make_pre_verify -> a NUDGE naming open claims; it never blocks.
 - pre_tool_call (hermes_cli/plugins.py:1987-2016): for falsify_judge only, returns {"action": "approve"} naming the
-  record's exact check and mutant argv, so Hermes's own human gate asks (tools/approval.py:1208); it fails closed when
+  record's exact check argv (run on the final tree and on its reverts), so Hermes's own human gate asks (tools/approval.py:1208); it fails closed when
   no human is present (approval.py:1231).
 - post_approval_response (observer, plugins.py:144-147; fired at approval.py:996 and approval_prompt.py:252/375):
   a human 'once'/'session'/'always' for rule plugin_rule:falsify:<record sha> becomes a ONE-SHOT grant.
@@ -54,11 +54,11 @@ def _record_or_none(store, rid):
 
 
 def approval_message(rec, rid):
-    chk, mut = rec["check"], rec["mutant"]
-    patch = f" after patching {mut['patch']['path']}" if mut.get("patch") else ""
-    return (f"falsify will RUN two commands for claim {rec['claim'][:120]!r} (record {rid[:12]}): "
-            f"the MUTANT {mut['argv']!r}{patch} (must FAIL) and the CHECK {chk['argv']!r} in "
-            f"{chk.get('cwd') or '.'}, with your permissions and no sandbox.")
+    chk = rec["check"]
+    return (f"falsify will RUN the CHECK {chk['argv']!r} (in {chk.get('cwd') or '.'} of {rec['repo']}) for claim "
+            f"{rec['claim'][:120]!r} (record {rid[:12]}), in temp copies: on your final tree (must PASS), then as the "
+            f"MUTANT with your change since {rec['base'][:12]} reverted (must FAIL), then once per hunk reverted alone. "
+            f"With your permissions and no sandbox.")
 
 
 def make_pre_tool_call(store):
@@ -76,7 +76,8 @@ def make_pre_tool_call(store):
 def make_tools(store, grants):
     def register(args, **_):
         try:
-            rid = store.register(args.get("claim"), args.get("check"), args.get("mutant"), args.get("note", ""))
+            rid = store.register(args.get("claim"), args.get("repo"), args.get("check"), args.get("base") or "HEAD",
+                                 args.get("note", ""))
         except Refused as e:
             return _json({"error": str(e)})
         return _json({"record": rid})
@@ -100,9 +101,7 @@ def make_tools(store, grants):
 
     argv = {"type": "object", "properties": {
         "argv": {"type": "array", "items": {"type": "string"}}, "cwd": {"type": "string"},
-        "expect_rc": {"type": "integer"}, "timeout_s": {"type": "number"},
-        "patch": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"},
-                                                   "new": {"type": "string"}}}}, "required": ["argv"]}
+        "expect_rc": {"type": "integer"}, "timeout_s": {"type": "number"}}, "required": ["argv"]}
 
     def schema(name, desc, props, req):
         return {"name": name, "description": desc,
@@ -110,13 +109,16 @@ def make_tools(store, grants):
 
     return [
         ("falsify_register", schema("falsify_register",
-            "Pre-register a claim: its check (argv that must pass) and a mutant (argv, optionally after a one-string "
-            "patch, that must FAIL). Hashed before any run; returns the record sha. Runs nothing.",
-            {"claim": {"type": "string"}, "check": argv, "mutant": argv, "note": {"type": "string"}},
-            ["claim", "check", "mutant"]), register),
+            "Pre-register a claim BEFORE you change anything: the claim, the git repo, the check (argv that must "
+            "pass; cwd relative to the repo) and the base commit (default HEAD). Hashed before any run; returns the "
+            "record sha. Runs nothing. The mutant is derived later: your own change, reverted.",
+            {"claim": {"type": "string"}, "repo": {"type": "string"}, "check": argv, "base": {"type": "string"},
+             "note": {"type": "string"}}, ["claim", "repo", "check"]), register),
         ("falsify_judge", schema("falsify_judge",
-            "Judge a registered claim: after a HUMAN approves the exact argv, run the mutant (must fail) then the "
-            "check. proved / disproved / VOID (vacuous, or not run). Unapproved = VOID 'not run', nothing runs.",
+            "Judge a registered claim after your change: once a HUMAN approves the exact argv, run the check on your "
+            "final tree (must pass) and with your change reverted, whole and per hunk (must fail). proved (k of h "
+            "hunks covered) / disproved / VOID (passes without your change, no change, or not run). Unapproved = "
+            "VOID 'not run', nothing runs.",
             {"record": {"type": "string"}}, ["record"]), judge),
         ("falsify_done", schema("falsify_done",
             "Mark a claim DONE on a proved result (refused otherwise).",

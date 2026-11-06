@@ -2,6 +2,7 @@
 import json
 import re
 import os
+import subprocess  # the TEST builds a git repo; the plugin itself never imports subprocess
 import pathlib
 import sys
 import tempfile
@@ -52,12 +53,15 @@ class TestHermesPlugin(unittest.TestCase):
         P.register(self.ctx)
         self.work = pathlib.Path(self.tmp.name) / "w"
         self.work.mkdir()
-        (self.work / "f.py").write_text("X = 1\n")
-        self.marker = self.work / "ran"
-        chk = {"argv": [sys.executable, "-c", f"open({str(self.marker)!r},'a').write('c');import f;assert f.X==1"],
-               "cwd": str(self.work)}
-        mut = dict(chk, patch={"path": "f.py", "old": "X = 1", "new": "X = 2"})
-        self.rid = json.loads(self.ctx.tools["falsify_register"]({"claim": "X is 1", "check": chk, "mutant": mut}))["record"]
+        (self.work / "f.py").write_text("X = 0\n")
+        g = lambda *a: subprocess.run(["git", "-C", str(self.work), *a], check=True, capture_output=True)
+        g("init", "-q")
+        g("add", "-A")
+        g("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "base")
+        self.marker = pathlib.Path(self.tmp.name) / "ran"
+        chk = {"argv": [sys.executable, "-c", f"open({str(self.marker)!r},'a').write('c');import f;assert f.X==1"]}
+        self.rid = json.loads(self.ctx.tools["falsify_register"]({"claim": "X is 1", "repo": str(self.work), "check": chk}))["record"]
+        (self.work / "f.py").write_text("X = 1\n")   # the agent's change, made after registering
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -86,6 +90,7 @@ class TestHermesPlugin(unittest.TestCase):
         self.assertEqual(d["action"], "approve")
         self.assertEqual(d["rule_key"], "falsify:" + self.rid)
         self.assertIn("MUTANT", d["message"])
+        self.assertIn(repr([sys.executable, "-c", f"open({str(self.marker)!r},'a').write('c');import f;assert f.X==1"]), d["message"])
         self.assertIn(self.rid[:12], d["message"])
         self.assertIsNone(self.ctx.hooks["pre_tool_call"][0](tool_name="terminal", args={"command": "ls"}))
 

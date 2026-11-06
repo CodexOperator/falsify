@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 """falsify: an agent's claim is not DONE until it survives a check that could have failed.
 
-Three acts, pure stdlib, one store directory:
-  register  a falsifier RECORD {claim, check, mutant} is canonicalised and hashed (sha256) BEFORE any run; the file is
-            content-addressed (records/<sha>.json) and written exclusive-create, so an edit is a NEW record, never a
-            rewrite; a record whose bytes no longer hash to its name has MOVED.
-  judge     re-hash the record, then run the check and its MUTANT (the same check against a deliberately broken
-            subject). The mutant MUST FAIL: if it passes, the check could not have failed, so the verdict is VOID
-            (vacuous). Otherwise: check passes -> proved; check fails -> disproved (a full result, never an error).
+v2: the mutant is DERIVED from the agent's own change, never written by the agent.
+  register  BEFORE the work: the claim, the check (argv + cwd relative to the repo + timeout + expect_rc) and the BASE
+            commit B of a git repo are canonicalised and hashed (sha256); records/<sha>.json is written exclusive-create,
+            so an edit is a NEW record; a file whose bytes no longer hash to its name has MOVED.
+  judge     AFTER the work: the final tree F is the repo's working tree as `git add -A` sees it (a private index; the
+            user's index is never touched). The change is diff(B, F). The check runs on a temp copy of the final tree
+            and MUST PASS; then on a temp copy with the WHOLE change reverted it MUST FAIL; then each HUNK is reverted
+            alone: "the check covers k of h hunks of your change". Same argv, different trees: one approval covers it.
+              check fails on the final tree               -> disproved (a full result, never an error)
+              check passes with the whole change reverted -> VOID "your check passes without your change"
+              no change (B == F)                           -> VOID "no mutant"
+              otherwise                                    -> proved, with k of h
             The result is written content-addressed too (results/<sha>.json), naming the record's sha.
-  done      a claim is DONE only on a RESOLVABLE result: the result file exists and hashes to its name, its record
-            exists and hashes to its name, the result names that record and that claim, and the verdict is proved.
-            Anything else is refused with the reason (the evidence gate).
+  done      a claim is DONE only on a RESOLVABLE result: result and record both exist and hash to their names, the
+            result names that record and claim, and the verdict is proved; else refused with the reason.
 
-R1 (rule 12): the judge runs ONLY the argv already in the hashed record, and only what an APPROVER says yes to: judge()
-takes approve(kind, argv, cwd, record_sha) -> bool, asked for the mutant AND the check BEFORE either runs; no approver,
-a "no", or interactive=False (cron, gateway, any non-interactive caller) = VOID 'not run', never a silent run.
+R1 (rule 12): the judge runs ONLY the argv already in the hashed record, and only what an APPROVER says yes to:
+judge() takes approve(kind, argv, cwd, record_sha) -> bool, asked BEFORE anything runs; no approver, a "no", or
+interactive=False (cron, gateway, any non-interactive caller) = VOID 'not run', never a silent run.
 R2 (rule 9): falsify never blocks completion; it records verdicts and NUDGES (falsify.adapter.make_pre_verify).
 
-The vacuity rule (from goal:g5.50): a mutant that cannot differ from the check is VOID before anything runs (same
-command, cwd and no patch), and a mutant that passes is VOID after.
-
-A check is {"argv": [...], "cwd": optional dir, "timeout_s": optional, "expect_rc": optional (0)}; it PASSES iff it
-exits with expect_rc inside its timeout. A mutant is a check plus an optional "patch": {"path", "old", "new"}: the
-judge copies the check's cwd to a temp dir, replaces `old` (which must occur exactly once) with `new` in `path`, and
-runs the mutant there, so the real tree is never touched.
+Temp copies exclude `.git` (the check runs on files, not history) and include ignored files (a venv, build outputs),
+so both trees differ ONLY by the change.
 """
-import hashlib, json, os, shutil, subprocess, sys, tempfile, time
+import hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
 DEFAULT_TIMEOUT_S = 60
 OUT_CAP = 4096
+MAX_HUNKS = 50
 
 
 class Refused(Exception):
@@ -49,31 +49,79 @@ def read_bytes(p):
         return f.read()
 
 
-def write_text(p, s):
-    with open(p, "w", encoding="utf-8") as f:
-        f.write(s)
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def _norm_check(c, what):
+# ---------- git ----------
+def git(repo, *args, env=None, inp=None):
+    p = subprocess.run(["git", "-C", repo, *args], capture_output=True, input=inp, env={**os.environ, **(env or {})})
+    if p.returncode:
+        raise Refused(f"git {' '.join(args[:2])} failed: {p.stderr.decode(errors='replace').strip()[:300]}")
+    return p.stdout
+
+
+NEVER_THE_CHANGE = (":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/*.pyc")   # bytecode a test run leaves behind
+
+
+def final_tree(repo):
+    """The working tree as a git tree sha, through a PRIVATE index (untracked non-ignored files included, bytecode
+    excluded: running the check in the repo writes __pycache__, which is never the agent's change)."""
+    with tempfile.TemporaryDirectory(prefix="falsify-idx-") as t:
+        env = {"GIT_INDEX_FILE": os.path.join(t, "index")}
+        git(repo, "read-tree", "--empty", env=env)
+        git(repo, "add", "-A", "--", ".", *NEVER_THE_CHANGE, env=env)
+        return git(repo, "write-tree", env=env).decode().strip()
+
+
+def change(repo, base_tree, tree):
+    """diff(base, final) with ZERO context lines: every changed region is its own hunk (git's default 3 lines of
+    context would merge nearby edits into one). It is only ever applied, reversed, onto an exact copy of the final
+    tree, so the missing context cannot misplace it."""
+    return git(repo, "diff", "-U0", "--binary", "--no-renames", "--full-index", base_tree, tree)
+
+
+def hunks(diff):
+    """Split a git diff into units revertable alone: each @@ hunk with its file header; a file section with no @@
+    (binary, mode-only, empty new file) is one unit. -> [(path, patch bytes)]"""
+    units = []
+    for sec in re.split(rb"(?m)^(?=diff --git )", diff):
+        if not sec.strip():
+            continue
+        m = re.match(rb"diff --git a/(.*?) b/", sec)
+        path = m.group(1).decode(errors="replace") if m else "?"
+        parts = re.split(rb"(?m)^(?=@@ )", sec)
+        head, hs = parts[0], parts[1:]
+        if not hs or b"GIT binary patch" in head:
+            units.append((path, sec))
+        else:
+            units.extend((path, head + h) for h in hs)
+    return units
+
+
+def copy_tree(repo, dst):
+    shutil.copytree(repo, dst, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+
+
+def revert(dst, patch):
+    """git apply -R inside dst (a throwaway repo root, removed after) -> None, or the reason it did not apply."""
+    subprocess.run(["git", "init", "-q", dst], check=True, capture_output=True)
+    try:
+        p = subprocess.run(["git", "-C", dst, "apply", "-R", "--unidiff-zero", "--binary", "-"], input=patch, capture_output=True)
+        return None if p.returncode == 0 else p.stderr.decode(errors="replace").strip()[:300]
+    finally:
+        shutil.rmtree(os.path.join(dst, ".git"), ignore_errors=True)
+
+
+# ---------- the record ----------
+def _norm_check(c):
     if not isinstance(c, dict) or not isinstance(c.get("argv"), list) or not c["argv"] or not all(isinstance(a, str) for a in c["argv"]):
-        raise Refused(f"{what}.argv must be a non-empty list of strings")
-    out = {"argv": list(c["argv"]), "expect_rc": int(c.get("expect_rc", 0)), "timeout_s": float(c.get("timeout_s", DEFAULT_TIMEOUT_S))}
-    if c.get("cwd") is not None:
-        out["cwd"] = os.path.abspath(c["cwd"])
-    if c.get("patch") is not None:
-        p = c["patch"]
-        if what != "mutant":
-            raise Refused("only the mutant may carry a patch")
-        if not all(isinstance(p.get(k), str) for k in ("path", "old", "new")) or not p["old"] or p["old"] == p["new"]:
-            raise Refused("mutant.patch needs path, old (non-empty) and new (different from old)")
-        out["patch"] = {k: p[k] for k in ("path", "old", "new")}
-    return out
-
-
-def vacuous_by_construction(check, mutant):
-    """The g5.50 rule, static half: a mutant that runs the same command in the same place with no patch cannot differ."""
-    return mutant.get("patch") is None and mutant["argv"] == check["argv"] and mutant.get("cwd") == check.get("cwd") \
-        and mutant["expect_rc"] == check["expect_rc"]
+        raise Refused("check.argv must be a non-empty list of strings")
+    cwd = os.path.normpath(c.get("cwd", "."))
+    if os.path.isabs(cwd) or cwd.split(os.sep)[0] == "..":
+        raise Refused("check.cwd must be relative to the repo and inside it")
+    return {"argv": list(c["argv"]), "cwd": cwd, "expect_rc": int(c.get("expect_rc", 0)),
+            "timeout_s": float(c.get("timeout_s", DEFAULT_TIMEOUT_S))}
 
 
 class Store:
@@ -110,42 +158,77 @@ class Store:
         return json.loads(b), None
 
     # ---- register ----
-    def register(self, claim, check, mutant, note=""):
+    def register(self, claim, repo, check, base="HEAD", note=""):
         if not isinstance(claim, str) or not claim.strip():
             raise Refused("claim must be a non-empty string")
-        rec = {"claim": claim, "check": _norm_check(check, "check"), "mutant": _norm_check(mutant, "mutant"), "note": note,
-               "registered_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        top = git(os.path.abspath(repo), "rev-parse", "--show-toplevel").decode().strip()
+        b = git(top, "rev-parse", "--verify", f"{base}^{{commit}}").decode().strip()
+        rec = {"claim": claim, "repo": top, "base": b, "base_tree": git(top, "rev-parse", f"{b}^{{tree}}").decode().strip(),
+               "check": _norm_check(check), "note": note, "registered_at": now()}
         return self._write_once("records", rec)
 
     # ---- judge ----
-    def judge(self, rid, approve=None, interactive=True):
+    def judge(self, rid, approve=None, interactive=True, max_hunks=MAX_HUNKS):
         rec, why = self.load("records", rid)
         if rec is None:
-            return self._result(rid, None, "void", why, None, None)
-        chk, mut = rec["check"], rec["mutant"]
-        if vacuous_by_construction(chk, mut):
-            return self._result(rid, rec["claim"], "void", "vacuous by construction: the mutant cannot differ from the check", None, None)
+            return self._result(rid, None, "void", why)
         if not interactive:
-            return self._result(rid, rec["claim"], "void", "not run: a non-interactive caller never runs a check", None, None)
+            return self._result(rid, rec["claim"], "void", "not run: a non-interactive caller never runs a check")
         if approve is None:
-            return self._result(rid, rec["claim"], "void", "not run: no approver", None, None)
-        for kind, c in (("mutant", mut), ("check", chk)):   # both asked BEFORE either runs; the record's own argv only
-            if approve(kind, list(c["argv"]), c.get("cwd", chk.get("cwd")), rid) is not True:
-                return self._result(rid, rec["claim"], "void", f"not run: the {kind} was not approved", None, None)
-        m = run_mutant(mut, chk)
-        if m.get("error"):
-            return self._result(rid, rec["claim"], "void", f"mutant could not be built: {m['error']}", None, m)
-        if m["passed"]:
-            return self._result(rid, rec["claim"], "void", "the mutant PASSED: the check could not have failed (vacuous)", None, m)
-        c = run_check(chk)
-        if c["timed_out"]:
-            return self._result(rid, rec["claim"], "void", "the check timed out: no reading", c, m)
-        v = "proved" if c["passed"] else "disproved"
-        return self._result(rid, rec["claim"], v, "the mutant failed as required; the check " + ("passed" if c["passed"] else "failed"), c, m)
+            return self._result(rid, rec["claim"], "void", "not run: no approver")
+        chk = rec["check"]
+        try:
+            F = final_tree(rec["repo"])
+            diff = change(rec["repo"], rec["base_tree"], F)
+        except Refused as e:
+            return self._result(rid, rec["claim"], "void", f"not run: {e}")
+        ev = {"final_tree": F, "diff_sha256": sha(diff)}
+        if not diff:
+            return self._result(rid, rec["claim"], "void", "no mutant: the tree has no change since the base", **ev)
+        if approve("check", list(chk["argv"]), os.path.join(rec["repo"], chk["cwd"]), rid) is not True:
+            return self._result(rid, rec["claim"], "void", "not run: the check was not approved", **ev)
+        units = hunks(diff)
+        ev["hunks_total"] = len(units)
+        with tempfile.TemporaryDirectory(prefix="falsify-") as tmp:
+            fin = os.path.join(tmp, "final")
+            copy_tree(rec["repo"], fin)
+            c = run_check(chk, fin)
+            ev["final_run"] = c
+            if c["timed_out"]:
+                return self._result(rid, rec["claim"], "void", "the check timed out on the final tree: no reading", **ev)
+            if not c["passed"]:
+                return self._result(rid, rec["claim"], "disproved", "the check FAILS on your final tree", **ev)
+            r, ev["reverted_run"] = self._mutant(chk, rec["repo"], tmp, "reverted", diff)
+            if r != "killed":
+                return self._result(rid, rec["claim"], "void", r, **ev)
+            cover = []
+            for i, (path, patch) in enumerate(units[:max_hunks]):
+                v, run = self._mutant(chk, rec["repo"], tmp, f"hunk{i}", patch)
+                cover.append({"path": path, "patch_sha256": sha(patch), "outcome": v, "run": run})
+        k = sum(x["outcome"] == "killed" for x in cover)
+        ev.update(hunks_measured=len(cover), hunks_killed=k, hunks=cover)
+        more = f" ({len(units) - len(cover)} beyond the cap not measured)" if len(units) > len(cover) else ""
+        return self._result(rid, rec["claim"], "proved", f"the check passes on your change and fails without it; it covers {k} of {len(units)} hunks{more}", **ev)
 
-    def _result(self, rid, claim, verdict, why, check_run, mutant_run):
-        res = {"record": rid, "claim": claim, "verdict": verdict, "why": why, "check_run": check_run, "mutant_run": mutant_run,
-               "judged_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    def _mutant(self, chk, repo, tmp, name, patch):
+        """-> (outcome, run): killed, or the VOID reason."""
+        d = os.path.join(tmp, name)
+        copy_tree(repo, d)
+        try:
+            err = revert(d, patch)
+            if err:
+                return f"unrevertable: the revert does not apply ({err})", None
+            r = run_check(chk, d)
+            if r["timed_out"]:
+                return "unrevertable: the check timed out on the reverted tree", r
+            if r["passed"]:
+                return "your check passes without your change", r
+            return "killed", r
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _result(self, rid, claim, verdict, why, **ev):
+        res = {"record": rid, "claim": claim, "verdict": verdict, "why": why, "evidence": ev, "judged_at": now()}
         return self._write_once("results", res), res
 
     # ---- done (the evidence gate) ----
@@ -204,45 +287,18 @@ class Store:
 
 
 # ---------- running ----------
-def _run(c, cwd):
+def run_check(c, tree):
     t0 = time.time()
     try:
-        p = subprocess.run(c["argv"], cwd=cwd, capture_output=True, timeout=c["timeout_s"])
+        p = subprocess.run(c["argv"], cwd=os.path.join(tree, c["cwd"]), capture_output=True, timeout=c["timeout_s"])
         rc, to, out, err = p.returncode, False, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
         rc, to, out, err = None, True, e.stdout or b"", e.stderr or b""
     except OSError as e:
         rc, to, out, err = None, False, b"", str(e).encode()
-    return {"argv": c["argv"], "rc": rc, "timed_out": to, "passed": (not to) and rc == c["expect_rc"], "wall_s": round(time.time() - t0, 3),
+    return {"rc": rc, "timed_out": to, "passed": (not to) and rc == c["expect_rc"], "wall_s": round(time.time() - t0, 3),
             "stdout_sha256": sha(out), "stderr_sha256": sha(err), "stdout_tail": out[-OUT_CAP:].decode(errors="replace"),
             "stderr_tail": err[-OUT_CAP:].decode(errors="replace")}
-
-
-def run_check(c):
-    return _run(c, c.get("cwd"))
-
-
-def run_mutant(m, check):
-    """The mutant runs in a TEMP COPY of its cwd (the check's when it names none) with its patch applied; never in place."""
-    if m.get("patch") is None:
-        return _run(m, m.get("cwd", check.get("cwd")))
-    src = m.get("cwd", check.get("cwd"))
-    if not src or not os.path.isdir(src):
-        return {"error": "a patched mutant needs a cwd directory to copy"}
-    with tempfile.TemporaryDirectory(prefix="falsify-mut-") as tmp:
-        dst = os.path.join(tmp, "tree")
-        shutil.copytree(src, dst, symlinks=True)
-        f = os.path.join(dst, m["patch"]["path"])
-        if not os.path.realpath(f).startswith(os.path.realpath(dst) + os.sep) or not os.path.isfile(f):
-            return {"error": f"patch path {m['patch']['path']!r} is not a file inside the tree"}
-        t = read_bytes(f).decode("utf-8")
-        n = t.count(m["patch"]["old"])
-        if n != 1:
-            return {"error": f"patch 'old' occurs {n} times in {m['patch']['path']!r}, must be exactly once"}
-        write_text(f, t.replace(m["patch"]["old"], m["patch"]["new"]))
-        r = _run(m, dst)
-        r["patched"] = m["patch"]["path"]
-        return r
 
 
 # ---------- CLI ----------
@@ -251,11 +307,11 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="falsify", description=__doc__.split("\n")[0])
     ap.add_argument("--store", default=os.environ.get("FALSIFY_STORE", ".falsify"))
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("register", help="register a falsifier record from a JSON file {claim, check, mutant, note?}")
+    r = sub.add_parser("register", help="register BEFORE the work: a JSON file {claim, repo, check, base?, note?}")
     r.add_argument("file")
-    j = sub.add_parser("judge", help="judge a registered record by its sha")
+    j = sub.add_parser("judge", help="judge a registered record by its sha, AFTER the work")
     j.add_argument("record")
-    j.add_argument("--approve", action="store_true", help="the operator approves running this record's check and mutant")
+    j.add_argument("--approve", action="store_true", help="the operator approves running this record's check")
     d = sub.add_parser("done", help="mark a claim done on a proved result")
     d.add_argument("claim")
     d.add_argument("result")
@@ -265,9 +321,9 @@ def main(argv):
     try:
         if a.cmd == "register":
             spec = json.loads(read_bytes(a.file))
-            print(S.register(spec["claim"], spec["check"], spec["mutant"], spec.get("note", "")))
+            print(S.register(spec["claim"], spec["repo"], spec["check"], spec.get("base", "HEAD"), spec.get("note", "")))
         elif a.cmd == "judge":
-            yes = a.approve or (sys.stdin.isatty() and input(f"run record {a.record[:12]}'s mutant and check? [y/N] ").strip().lower() == "y")
+            yes = a.approve or (sys.stdin.isatty() and input(f"run record {a.record[:12]}'s check on your change and its reverts? [y/N] ").strip().lower() == "y")
             h, res = S.judge(a.record, approve=(lambda *_: True) if yes else None, interactive=a.approve or sys.stdin.isatty())
             print(json.dumps({"result": h, "verdict": res["verdict"], "why": res["why"]}))
             return {"proved": 0, "disproved": 1}.get(res["verdict"], 2)

@@ -12,8 +12,8 @@ def test_the_demo_story():
     w, h = out["weak"], out["honest"]
     assert w["receipt_green"] and w["verdict"] == "void" and w["covered"] == 0 and w["done"].startswith("refused")
     assert w["words"] == "your check passes without your change"
-    assert h["receipt_green"] and h["verdict"] == "proved" and (h["covered"], h["hunks"]) == (2, 2) and h["done"] == "DONE"
+    assert h["receipt_green"] and h["verdict"] == "proved" and h["hunks"] >= 1 and h["covered"] == h["hunks"] and h["done"] == "DONE"
     assert [r["verdict"] for r in out["retry"]] == ["disproved", "void", "proved"]
     assert [r["receipt_green"] for r in out["retry"]] == [False, True, True]
-    assert out["ledger"]["registrations"] == 4 and out["ledger"]["attempts"] == 3
+    assert out["ledger"]["registrations"] == 3 and out["ledger"]["attempts"] == 3
     assert out["wall_s"] < 90
