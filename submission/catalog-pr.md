@@ -16,8 +16,9 @@ fail). It records proved / disproved / VOID and nudges through `pre_verify`; it 
   ordinary subprocesses with the user's permissions, on the final tree and on each reverted copy. There is NO sandbox:
   a check that deletes files, reaches the network or reads secrets does so when approved.
 - **Approval per run.** Before anything runs, `pre_tool_call` returns `approve` with the exact argv and the record's
-  hash, so Hermes's own human gate asks. Only a human `once` / `session` / `always` answer grants ONE run. Under cron,
-  gateway auto-approve, yolo or any run no human answered, the judge records VOID "not run" and executes nothing.
+  hash, so Hermes's own approval prompt asks. Only an answer at that prompt (`once` / `session` / `always`) grants ONE
+  run; falsify cannot tell whether a person or a script gave it. Under cron, gateway auto-approve, yolo or any run
+  nobody answered, the judge records VOID "not run" and executes nothing.
 - **Reads of the code under test.** The final tree is read through a private git index (`git add -A` into a temp
   index); the repo's own index, history and working tree are never written.
 - **The temp copy.** Every run happens in a temporary copy of the working tree (`.git` excluded, ignored files

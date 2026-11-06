@@ -29,7 +29,7 @@ nudge and a skill. Standalone: `python -m falsify --help`.
 | VOID "unrevertable" | a revert that does not apply, a reverted tree that fails the `sanity` argv, a check that dies outside `kill_rc` or times out: never counted as a kill |
 | VOID "no mutant" | no change since the base, no earlier base registered in this session, and no blind mutant |
 | proved / VOID (blind) | no diff and `blind: K`: K mutants drafted by a separate model that never sees the check, one drawn after the run by a committed seed |
-| VOID "not run" | no human approval, a "no", or a non-interactive caller; nothing executed |
+| VOID "not run" | no approval, a "no", or a non-interactive caller; nothing executed |
 
 ## What it does not prove
 
@@ -40,7 +40,7 @@ right property, or that untouched code works. A weak blind drafter makes a weak 
 
 falsify runs the registered check (and sanity) command as an ordinary subprocess with your permissions, in temporary
 copies of the repo's working tree. There is no sandbox: a check that deletes files, reaches the network or reads
-secrets will do so when approved. Every run first asks a human for the exact argv through Hermes's approval gate.
+secrets will do so when approved. Every run first shows the exact argv at Hermes's approval prompt and waits for an answer.
 
 ## How it differs from proofops
 

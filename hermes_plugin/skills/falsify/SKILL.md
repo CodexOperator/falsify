@@ -12,7 +12,7 @@ A claim ("the bug is fixed", "the test covers X") is not done until it survives 
    If you will add the check's own test file in the change, pass `keep` (e.g. `["tests/**"]`) so reverting your
    change never deletes the test itself. For pytest, `kill_rc` is `[1]` (the default): rc 2-5 are collection or
    usage errors, never kills. An optional `sanity` argv (e.g. an import) must pass on every reverted tree.
-2. Make the change, then `falsify_judge` with the record sha. A human approves the exact argv first; without that the result is
+2. Make the change, then `falsify_judge` with the record sha. The user approves the exact argv at Hermes's approval prompt first; without that the result is
    VOID 'not run' and nothing executes.
 3. Read the verdict: `proved` (the check passes on your change and fails with it reverted; it says how many of your
    hunks the check covers), `disproved` (the check fails on your change), or `void` (the check passes without your

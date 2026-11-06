@@ -53,7 +53,7 @@ verdict is VOID "not run".
 | **VOID** "unrevertable" | the revert does not apply, the reverted tree fails the optional `sanity` command, or the check dies with an exit code outside `kill_rc` (for pytest, 2-5 are collection errors, not failures) or times out |
 | **VOID** "no mutant" | nothing changed since the base, and no blind mutant was registered |
 | **proved / VOID** (blind) | nothing changed (docs, config, "it already works") and the claim was registered with `blind: K`: a separate model drafted K mutants without seeing the check, and one was drawn after the run |
-| **VOID** "not run" | no human approval, a "no", or a non-interactive caller (cron, gateway). Nothing executed |
+| **VOID** "not run" | no approval, a "no", or a non-interactive caller (cron, gateway). Nothing executed |
 
 `keep` (e.g. `["tests/**"]`) leaves the agent's new test files in place on every revert, so reverting the change never
 "fails" the check by deleting the test itself.
@@ -70,7 +70,8 @@ it.
   done on a proved result and about changed files no claim covers. Hermes arms `pre_verify` only after `write_file` /
   `patch` edits, so edits made through the terminal do not trigger it, and Hermes caps the nudges per turn.
 - **Runs only what was registered, only when approved.** The judge executes exactly the command stored in the hashed
-  record, after a human approves that command.
+  record, after it is approved at Hermes's approval prompt (or `--approve` on the CLI). falsify cannot tell whether
+  a person or a script answered that prompt.
 - **Never writes your repo.** It reads your working tree through a private git index and runs everything in temporary
   copies.
 - **Keeps a ledger.** Every registration and verdict is a hash-chained line, so retrying until green shows up.

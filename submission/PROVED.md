@@ -33,6 +33,8 @@
 - **It nudges; it never blocks.** Hermes consults `pre_verify` only when the agent stops after `write_file` / `patch`
   edits, at most `max_verify_nudges` times per turn (default 3). Edits made through the terminal never trigger it.
 - **No sandbox.** An approved check runs with the user's permissions in a temporary copy.
+- **Approval is an answer at Hermes's prompt, not proof of a person.** falsify cannot tell a person from a script answering
+  it; in session 10 a scripted stand-in answered.
 - **A proved claim means this check needs this change**, not that the code is correct or the check tests the right
   property. A blind mutant is only as good as its drafter.
 - **Closing the claim:** in session 10 the agent did not call `falsify_done`. The closing-call hint (G3) is on main and
