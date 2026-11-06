@@ -7,8 +7,23 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-import hermes_plugin as P  # noqa: E402
+import importlib.util
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _load_like_hermes():
+    """Load the repo root as ONE package the way Hermes's loader does (spec_from_file_location +
+    submodule_search_locations), so the relative imports are exercised as the host runs them."""
+    spec = importlib.util.spec_from_file_location("falsify_plugin_under_test", ROOT / "__init__.py",
+                                                  submodule_search_locations=[str(ROOT)])
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return sys.modules[spec.name + ".hermes_plugin"]
+
+
+P = _load_like_hermes()
 
 
 class FakeState:
@@ -60,7 +75,7 @@ class TestHermesPlugin(unittest.TestCase):
            session_key="s", choice=choice)
 
     def test_registers_exactly_the_manifest_surface(self):
-        y = (pathlib.Path(P.__file__).parent / "plugin.yaml").read_text()
+        y = (ROOT / "plugin.yaml").read_text()
         decl = lambda key: re.findall(r"^  - (\S+)$", re.split(r"\n(?=\S)", y.split(key + ":\n")[1])[0], re.M)
         self.assertEqual(sorted(self.ctx.hooks), sorted(decl("provides_hooks")))
         self.assertEqual(sorted(self.ctx.tools), sorted(decl("provides_tools")))
@@ -109,6 +124,12 @@ class TestHermesPlugin(unittest.TestCase):
         rid_res = res["result"]
         self.call("falsify_done", {"claim": "X is 1", "result": rid_res})
         self.assertIsNone(pv(attempt=0))
+
+    def test_register_writes_nothing(self):
+        d = tempfile.mkdtemp()
+        ctx = FakeCtx(d)
+        P.register(ctx)
+        self.assertEqual(os.listdir(d), [])
 
     def test_plugin_never_imports_subprocess(self):
         src = (pathlib.Path(P.__file__)).read_text()

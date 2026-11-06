@@ -1,5 +1,6 @@
 name: falsify
 version: 0.1.0
+requires_hermes: ">=0.23.0"
 description: "A claim is not done until it survives a pre-registered check AND a mutant that must fail (VOID if the mutant passes). Nudges before finish via pre_verify; never blocks completion; every check and mutant runs only after a human approves its exact argv."
 author: "falsify (private, pre-release)"
 provides_hooks:
@@ -11,3 +12,4 @@ provides_tools:
   - falsify_judge
   - falsify_done
   - falsify_status
+python_dependencies: []

@@ -13,14 +13,9 @@ Seams (hermes-agent ca43606920, all public; rule 9: nothing wraps or rebinds AIA
   fires no response hook, so it judges VOID 'not run' and executes nothing (R1, rule 12)."""
 import json
 import os
-import sys
 import threading
 
-try:
-    from falsify import Refused, Store, adapter
-except ImportError:  # the plugin dir sits beside the falsify package in this repo
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from falsify import Refused, Store, adapter
+from ..falsify import Refused, Store, adapter
 
 RULE_PREFIX = "falsify:"
 HUMAN_YES = frozenset({"once", "session", "always"})
@@ -132,15 +127,23 @@ def make_tools(store, grants):
     ]
 
 
-def store_root(ctx):
-    try:
-        return str(ctx.state.data_dir / "store")
-    except Exception:
-        return os.path.join(os.path.expanduser("~"), ".hermes", "falsify-store")
+class LazyStore:
+    """The Store, created on FIRST USE under this plugin's own data dir (ctx.state.data_dir, profile-scoped):
+    register() writes nothing (Hermes's capability probe runs it in isolation), and there is no fallback
+    path outside the plugin's data."""
+
+    def __init__(self, ctx):
+        self._ctx, self._store, self._lock = ctx, None, threading.Lock()
+
+    def __getattr__(self, name):
+        with self._lock:
+            if self._store is None:
+                self._store = Store(str(self._ctx.state.data_dir / "store"))
+        return getattr(self._store, name)
 
 
 def register(ctx):
-    store, grants = Store(store_root(ctx)), Grants()
+    store, grants = LazyStore(ctx), Grants()
     for name, schema, handler in make_tools(store, grants):
         ctx.register_tool(name=name, toolset="falsify", schema=schema, handler=handler,
                           description=schema["description"])
