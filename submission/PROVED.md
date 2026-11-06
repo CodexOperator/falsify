@@ -27,6 +27,10 @@
 | goal:g5.52, 20 tasks (SOLVED = falsify PROVED on the agent's own check AND a hidden test passes): Haiku 5.5 20/20 for $0.0198 ($0.00099 per solve), Sonnet 5.5 batch 20/20 $0.0701, Sonnet 5.5 20/20 $0.2656, Opus 5.5 20/20 $0.6762, local Qwen3-4B 6/20 at $0 | agi graph posts/thought-master c0fd488d54, experiment:solved-claims-per-dollar-local-and-console-g5-52-run-1; hypothesis:solved-claims-per-dollar-local-and-console-g5-52 (proved) |
 | On that suite, two planted ways to game it failed on all 20 tasks: an agent that edits nothing solved 0/20; one that only adds a passing test read VOID on 20/20. The reference fix (the positive control) read SOLVED 20/20 | same experiment node (M-SOLVE, M-HIDE, M-GOLD) |
 | Prompt caching cut Sonnet's bill to 0.636 of the same usage priced flat | same experiment node (E-CACHE) |
+| goal:g5.53, a harder suite of 40 tasks in three tiers (A multi-file, B algorithmic, C specification), 3 runs each: Opus 5.5 does NOT separate from Haiku 5.5 (per-task Opus minus Haiku rate -0.033, 95% cluster bootstrap [-0.092, 0.042]); solved of 120: Sonnet loop 120, unreal-agent 120, pi 119, Haiku loop 116, droid 113, Opus loop 112, Sonnet batch one-shot 106; local Qwen3-4B 0 of 40 | experiment:opus-does-not-separate-from-haiku-on-a-tiered-suite-g5-53-run-1, agi graph posts/thought-master 575cd46c41; hypothesis:opus-does-not-separate-from-haiku-on-a-tiered-suite-g5-53 (disproved, as pre-registered) |
+| On g5.53, the lowest USD per solve was pi on Haiku 5.5 ($0.002275 vs the bare Haiku loop's $0.002291), and it beat the loop under the pre-registered non-inferiority rule, against all three committed predictions. unreal-agent solved 120/120 at 1.55x the loop's cost per solve; droid 3.77x | same node (E-FRONT); goal:g5.53 v3 THOUGHT |
+| falsify's own error rate, measured on g5.53 against a hidden test: false assurance (falsify PROVED, the hidden test failed) Haiku loop 4 of 120 (3 in tier A, all on one task, a11, a currency-rounding edge; 1 in tier B), pi 1, droid 3, local Qwen3-4B 3 of 40, the Sonnet loop, unreal-agent, Opus loop and Sonnet batch 0; false alarm (the hidden test passed, falsify read VOID or disproved) Sonnet batch one-shot 14 of 120 (11 in tier C), Opus loop 8 (all 8 of Opus's misses), droid 1, local Qwen3-4B 1, every other arm 0 | same node (honesty per tier) |
+| The suite's controls held on g5.53 too: an agent that edits nothing 0/40, one that only adds a passing test VOID 40/40, the reference fix SOLVED 40/40 | same node (M-SOLVE, M-HIDE, M-GOLD) |
 
 ## Not proved, and the limits
 
@@ -55,4 +59,15 @@
   claude-haiku-5-5: pi 1.4.0 1.35x, unreal-agent a5f3fd1 1.80x, droid 0.247.0 5.2-5.3x, mostly from extra turns. No task
   discriminated, so this says nothing about solve rate. Source: experiment:harness-overhead-g5-52-suite-run-3, agi
   graph posts/thought-master 23642c1f50.
-- **goal:g5.53** (40 tasks, three tiers) is not closed: [PENDING, director-thought-science].
+- **g5.53's scope.** Its Console arms (Haiku, Sonnet, Opus loops and the Sonnet batch) ran through a minimal SCRIPTED
+  loop, not a harness; the three harnesses ran jailed through the door. Opus's 8 misses are falsify false alarms (the
+  hidden test passed), not wrong fixes, so the suite did not separate the models. pi's win over the bare loop is 0.7%
+  of USD per solve and FRAGILE: pi's dollars come from its own event log, the loop's are door-reconciled (different
+  books).
+- **What g5.53 shows about falsify itself.** False alarms concentrate where the agent writes its check BLIND: the Sonnet
+  batch arm writes patch and check in one shot without running either, and 11 of its 14 false alarms are in the
+  specification tier, where its own check fails on its own (correct) final tree. falsify judges the agent's own check;
+  a check that is wrong on a correct fix reads disproved, and the derived mutant cannot rescue it. In the specification
+  tier, the derived mutant is the unimplemented stub, so PROVED is near-automatic there and a hidden test carries the
+  verdict; that is where false assurance could hide. On g5.53 none occurred in that tier: the Haiku loop's 4 were in
+  tiers A (3) and B (1).
