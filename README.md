@@ -43,6 +43,10 @@ against. Without a drafter, `blind` is refused; with a diff, the derived mutant 
 Measured on the local Qwen3-4B (`demo/run_blind_live.py`, K 5, the fixture with no diff): the honest check PROVED (it
 kills 5 of 5 kept mutants), the weak, mocking check VOID (it kills 1 of 5: only the one in `cart.py`, the code it
 does not mock); 5 of 5 drafts valid per claim, 213 s and about 12k completion tokens per draft.
+On the Console (claude-haiku-5-5, effort low, K 5, same claim), two drafter VIEWS: `files` (claim + base files): honest
+PROVED (kills 4 of 5), weak VOID (kills 1 of 5), 747 in / 1884 out tokens per draft. `claim` (the claim's words only):
+5 drafted, 0 applicable (it must guess the code), so both read VOID "no mutant". Total $0.004. The record keeps the
+drafter's `view` and `model`.
 Not proved: that the drafter's mutants are the ones that matter. A weak drafter makes a weak judge, and the record
 keeps `asked` / `drafted` / kept so that is visible.
 

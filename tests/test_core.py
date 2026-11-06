@@ -476,6 +476,18 @@ class Draft(unittest.TestCase):
         self.assertIn("=== f.py ===\nX = 1", msg)
         self.assertIn("Write 3 MUTANTS", msg)
 
+    def test_the_anthropic_drafter_in_claim_view_sends_the_claim_only(self):
+        sent = []
+        post = lambda u, payload, h, t: sent.append((u, payload, h)) or {"content": [{"type": "thinking", "thinking": ""},
+                                                                                     {"type": "text", "text": '{"mutants": []}'}]}
+        dr = D.make_drafter("http://door:1", "claude-haiku-5-5", k=2, post=post, api="anthropic", view="claim", api_key="lbl")
+        self.assertEqual(dr("X is 1", {"f.py": "SECRET_CODE = 1\n"}), [])
+        ((u, payload, h),) = sent
+        self.assertEqual((u, h["x-api-key"], h["anthropic-version"]), ("http://door:1/v1/messages", "lbl", "2023-06-01"))
+        self.assertIn("CLAIM: X is 1", payload["messages"][0]["content"])
+        self.assertNotIn("SECRET_CODE", json.dumps(payload))
+        self.assertNotIn("temperature", payload)
+
     def test_from_env_needs_a_url(self):
         self.assertIsNone(D.from_env({}))
         self.assertTrue(callable(D.from_env({"FALSIFY_DRAFT_URL": "http://127.0.0.1:9/v1"})))

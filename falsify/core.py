@@ -290,7 +290,8 @@ class Store:
                 if m and m not in kept:
                     kept.append(m)
             seed = secrets.token_hex(32)
-            rec["blind"] = {"asked": blind, "drafted": len(drafted), "mutants": kept, "seed_commit": sha(seed.encode())}
+            rec["blind"] = {"asked": blind, "drafted": len(drafted), "mutants": kept, "seed_commit": sha(seed.encode()),
+                            "view": getattr(self.drafter, "view", None), "model": getattr(self.drafter, "model", None)}
             p = os.path.join(self.root, "seeds", rec["blind"]["seed_commit"])
             if not os.path.exists(p):
                 with open(p, "x") as f:

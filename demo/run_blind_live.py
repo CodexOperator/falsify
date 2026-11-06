@@ -1,7 +1,7 @@
 """falsify step 4, live: a NO-diff claim on the demo fixture, K blind mutants drafted by the local model, judged with the
 honest and the weak check. Also measures every kept mutant against both checks (the draw judges one; the table says
-how the draw could have gone). Usage: python demo/run_blind_live.py <out.json> [K]  (needs a drafter at FALSIFY_DRAFT_URL, default the local
-llama.cpp server http://127.0.0.1:8091/v1, and pytest in FALSIFY_DEMO_PYTHON or this interpreter).
+how the draw could have gone). Usage: python demo/run_blind_live.py <out.json> [K]  (the drafter comes from FALSIFY_DRAFT_* (falsify.draft.from_env),
+default the local llama.cpp server http://127.0.0.1:8091/v1 in view "files"; and pytest in FALSIFY_DEMO_PYTHON or this interpreter).
 Measured 14:34Z 11-06, Qwen3-4B Q4_K_M, K 5: honest PROVED (drawn 0, kills 5 of 5), weak VOID (drawn 2, kills 1 of 5);
 5 of 5 drafts valid per claim, 213 s and 12018 completion tokens per draft, 0 USD."""
 import json, os, shutil, subprocess, sys, tempfile, time
@@ -15,7 +15,8 @@ repo = os.path.join(tmp, "shop")
 shutil.copytree(os.path.join(fpkg, "demo", "fixture"), repo, ignore=shutil.ignore_patterns("BUG.md", "__pycache__"))
 g = lambda *a: subprocess.run(["git", "-C", repo, *a], check=True, capture_output=True)
 g("init", "-q"); g("add", "-A"); g("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "base")
-dr = D.make_drafter(os.environ.get("FALSIFY_DRAFT_URL", "http://127.0.0.1:8091/v1"), os.environ.get("FALSIFY_DRAFT_MODEL", "qwen3-4b"), k=K, timeout=900)
+env = {"FALSIFY_DRAFT_URL": "http://127.0.0.1:8091/v1", "FALSIFY_DRAFT_MODEL": "qwen3-4b", **os.environ, "FALSIFY_DRAFT_K": str(K)}
+dr = D.from_env(env)
 S = F.Store(os.path.join(tmp, "store"), drafter=dr)
 claim = "checkout applies a pct% discount to the cart total, and the total is never negative"
 chk = lambda t: [PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", t]
@@ -24,7 +25,7 @@ honest = S.register(claim, repo, chk("tests/test_honest.py"), blind=K)
 draft_s = round(time.time() - t0, 1)
 usage = (dr.last or {}).get("usage")
 weak = S.register(claim + " (weak check)", repo, chk("tests/test_weak.py"), blind=K)   # a second, independent draft
-res = {"claim": claim, "K": K, "draft_wall_s": draft_s, "usage_first_draft": usage}
+res = {"claim": claim, "K": K, "model": dr.model, "view": dr.view, "draft_wall_s": draft_s, "usage_first_draft": usage}
 for name, rid in (("honest", honest), ("weak", weak)):
     rec = S.load("records", rid)[0]
     _, r = S.judge(rid, approve=lambda *a: True)
